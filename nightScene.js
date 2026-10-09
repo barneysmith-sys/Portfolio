@@ -1,4 +1,4 @@
-// ls3/living-sign/nightScene.ts
+// ls4/living-sign/nightScene.ts
 function makeNight(wrap, canvas, urls) {
   var W = 478, H = 494;
   var TAXI = { x: 209, y: 303, w: 129, h: 97 }, GLOW = { x: 207, y: 301, w: 143, h: 177 };
@@ -18,8 +18,8 @@ function makeNight(wrap, canvas, urls) {
     return v < a ? a : v > b ? b : v;
   };
   var dead = false, raf = 0, visible = true, onScreen = true, active = true;
-  var imgs = {}, pending = 5;
-  ["bg", "cars", "glow", "signals", "masks"].forEach(function(k) {
+  var imgs = {}, pending = 6;
+  ["bg", "cars", "glow", "signals", "masks", "glass"].forEach(function(k) {
     var im = new Image();
     im.onload = function() {
       if (--pending === 0) ready();
@@ -36,6 +36,7 @@ function makeNight(wrap, canvas, urls) {
   var scene = mk(W, H), sctx = scene.getContext("2d", { willReadFrequently: true });
   var srcData = null, outData, src32, out32, treeIdx, treeW, lum = null, roadPts = [], leafPts = [];
   var winOff = [];
+  var LIGHT_W = 60, LIGHT_H = 62, lightData = null;
   function ready() {
     if (dead) return;
     sctx.drawImage(imgs.bg, 0, 0);
@@ -60,6 +61,11 @@ function makeNight(wrap, canvas, urls) {
       }
       treeIdx = new Int32Array(idx);
       treeW = new Float32Array(wts);
+      var lc = mk(LIGHT_W, LIGHT_H), lctx = lc.getContext("2d", { willReadFrequently: true });
+      lctx.imageSmoothingEnabled = true;
+      lctx.imageSmoothingQuality = "high";
+      lctx.drawImage(imgs.bg, 0, 0, LIGHT_W, LIGHT_H);
+      lightData = lctx.getImageData(0, 0, LIGHT_W, LIGHT_H).data;
       WINS.forEach(function(wv) {
         var x = wv[0], y = wv[1], w = wv[2], h = wv[3];
         var oc = mk(w, h), oc2 = oc.getContext("2d"), id = oc2.createImageData(w, h);
@@ -116,41 +122,53 @@ function makeNight(wrap, canvas, urls) {
       ctx.fillRect(s.go[0] - 1, s.go[1] - 1, 3, 2);
     }
   }
-  var ENTER = 0.6, GAP = 0.6, FAR = 14;
-  var tmp = document.createElement("canvas"), tctx = tmp.getContext("2d");
+  var ENTER = 0.78, GAP = 0.55, FAR = 14;
+  var BODY_H = 80;
+  var TYRES = [[19, 92], [111, 92]];
   var LANE_X = [0, -133];
   var KINDS = [0, 0, 1, 2, 3, 4, 5], GLOWK = [1, 0.75, 0.85, 0.85, 0.85, 0.75];
+  var tmp = mk(220, 170), tctx = tmp.getContext("2d");
+  var tmp2 = mk(220, 170), t2ctx = tmp2.getContext("2d");
+  var spray = [];
   function newCar(laneIx, z, born) {
-    var v = R(0.8, 1.15);
-    return { lane: laneIx, z, v, kind: KINDS[rnd() * KINDS.length | 0], vmax: v, born, brake: 0.6, ph: R(0, 6) };
+    var v = R(0.32, 0.5);
+    return { lane: laneIx, z, v, kind: KINDS[rnd() * KINDS.length | 0], vmax: v, born, brake: 0.6, ph: R(0, 6), retune: R(4, 9), rollF: R(1.3, 2.1), bobF: R(6, 8.5) };
   }
   var traffic = [], spawnAt = [0, 0];
   (function seed() {
     var first = newCar(0, 1, -9);
     first.kind = 0;
     traffic.push(first);
-    [1.8, 2.7, 3.7, 5, 6.6, 8.5, 11, 13.3].forEach(function(z) {
-      traffic.push(newCar(0, z + R(-0.15, 0.15), -9));
-    });
-    [1.4, 2.3, 3.2, 4.4, 6, 7.9, 10, 12.6].forEach(function(z) {
-      traffic.push(newCar(1, z + R(-0.15, 0.15), -9));
-    });
-    spawnAt = [R(0.3, 1.2), R(0.8, 2)];
+    var z = 1;
+    while (z < FAR - 0.5) {
+      z += R(0.8, 2.2) * (1 + z * 0.08);
+      traffic.push(newCar(0, z, -9));
+    }
+    z = R(1.2, 1.8);
+    while (z < FAR - 0.5) {
+      traffic.push(newCar(1, z, -9));
+      z += R(0.9, 2.4) * (1 + z * 0.08);
+    }
+    spawnAt = [R(2, 5), R(4, 8)];
   })();
   function updateLane(t2, dt) {
-    traffic.sort(function(p, q) {
-      return q.z - p.z;
+    traffic.sort(function(p2, q) {
+      return q.z - p2.z;
     });
     var lead = [null, null];
     for (var k = 0; k < traffic.length; k++) {
       var c = traffic[k], ahead = lead[c.lane];
+      if (t2 > c.retune) {
+        c.vmax = clamp(c.vmax + R(-0.08, 0.08), 0.28, 0.55);
+        c.retune = t2 + R(4, 9);
+      }
       var room = ahead ? Math.max(0, ahead.z - GAP - c.z) : Infinity;
-      var vt = Math.min(c.vmax, Math.sqrt(2 * 0.9 * room));
+      var vt = Math.min(c.vmax, Math.sqrt(2 * 0.35 * room));
       var prev = c.v;
-      c.v = vt > c.v ? Math.min(vt, c.v + dt * 0.35) : Math.max(vt, c.v - dt * 1.4);
+      c.v = vt > c.v ? Math.min(vt, c.v + dt * 0.12) : Math.max(vt, c.v - dt * 0.5);
       c.z += c.v * dt;
-      var target = c.v < prev - 2e-3 ? 1 : 0.6;
-      c.brake += (target - c.brake) * Math.min(1, dt * 5);
+      var target = c.v < prev - 4e-4 ? 1 : 0.6;
+      c.brake += (target - c.brake) * Math.min(1, dt * 4);
       lead[c.lane] = c;
     }
     for (k = traffic.length - 1; k >= 0; k--) if (traffic[k].z > FAR) traffic.splice(k, 1);
@@ -158,74 +176,143 @@ function makeNight(wrap, canvas, urls) {
       if (t2 < spawnAt[L]) continue;
       var back = null;
       for (k = 0; k < traffic.length; k++) if (traffic[k].lane === L && (!back || traffic[k].z < back.z)) back = traffic[k];
-      if (!back || back.z > ENTER + GAP + 0.1) {
+      if (!back || back.z > ENTER + GAP + 0.15) {
         var nc = newCar(L, ENTER, t2);
-        if (back) nc.vmax = nc.v = Math.min(nc.v, back.v + 0.15);
+        if (back) nc.vmax = nc.v = Math.min(nc.v, back.v + 0.06);
         traffic.push(nc);
-        spawnAt[L] = t2 + R(1.1, 2.6);
-      } else spawnAt[L] = t2 + 0.3;
+        spawnAt[L] = t2 + R(2.6, 6.5);
+      } else spawnAt[L] = t2 + R(0.4, 1.2);
+    }
+    for (k = spray.length - 1; k >= 0; k--) {
+      var p = spray[k];
+      p.life -= dt;
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+      if (p.life <= 0) spray.splice(k, 1);
     }
   }
   function drawLane(t2) {
     for (var k = 0; k < traffic.length; k++) drawCar(traffic[k], t2);
+    drawSpray();
+  }
+  function ambientAt(x, y) {
+    if (!lightData) return null;
+    var lx = clamp(x / W * LIGHT_W | 0, 0, LIGHT_W - 1), ly = clamp(y / H * LIGHT_H | 0, 0, LIGHT_H - 1), i = (ly * LIGHT_W + lx) * 4;
+    return [lightData[i], lightData[i + 1], lightData[i + 2]];
   }
   function drawCar(c, t2) {
     var s = 1 / c.z;
-    var a = clamp((c.z - ENTER) / 0.06, 0, 1) * clamp((FAR - c.z) / 4, 0, 1);
-    var shade = c.born < -1 ? 0 : 1 - clamp((c.z - ENTER) / 0.32, 0, 1);
+    var a = clamp((c.z - ENTER) / 0.05, 0, 1) * clamp((FAR - c.z) / 4, 0, 1);
+    var shade = c.born < -1 ? 0 : 1 - clamp((c.z - ENTER) / 0.3, 0, 1);
     if (c.born < -1) a = clamp((FAR - c.z) / 4, 0, 1);
     if (a <= 0) return;
-    var bob = c.v > 0.05 ? Math.sin(t2 * 10.5 + c.ph) * 0.35 * s : 0;
-    var ax = VP[0] + (A0[0] + LANE_X[c.lane] - VP[0]) * s, ay = VP[1] + (A0[1] - VP[1]) * s + bob;
+    var moving = c.v > 0.03;
+    var bob = moving ? Math.sin(t2 * c.bobF + c.ph) * 0.55 + Math.sin(t2 * c.bobF * 1.73 + c.ph * 2.1) * 0.3 : 0;
+    var roll = moving ? Math.sin(t2 * c.rollF + c.ph) * 7e-3 : 0;
+    var ax = VP[0] + (A0[0] + LANE_X[c.lane] - VP[0]) * s, ay = VP[1] + (A0[1] - VP[1]) * s;
     var brake = c.brake, gk = GLOWK[c.kind];
+    var flick = 0.93 + 0.05 * Math.sin(t2 * 13 + c.ph * 3) + 0.02 * Math.sin(t2 * 31 + c.ph);
     ctx.save();
     ctx.globalCompositeOperation = "lighter";
-    ctx.globalAlpha = a * gk * (0.55 + 0.45 * brake) * (1 - shade);
+    ctx.globalAlpha = a * gk * (0.55 + 0.45 * brake) * (1 - shade) * (c.lane === 1 ? 0.8 : 1) * flick;
     var gx = ax - (A0[0] - GLOW.x) * s, gy = ay - (A0[1] - GLOW.y) * s, gw = GLOW.w * s;
-    ctx.globalAlpha *= c.lane === 1 ? 0.8 : 1;
     var rows = Math.round(GLOW.h / 2);
     for (var r = 0; r < rows; r++) {
       var sy = r * 2, below = sy > A0[1] - GLOW.y - 4;
-      var off = below ? Math.sin(t2 * 2.4 + r * 0.8) * 1.2 * s : 0;
+      var off = below ? Math.sin(t2 * 2.4 + r * 0.8 + c.ph) * 1.2 * s : 0;
       ctx.drawImage(imgs.glow, 0, sy, GLOW.w, 2, gx + off, gy + sy * s, gw, 2 * s + 0.5);
     }
     ctx.restore();
+    var dx = ax - (A0[0] - TAXI.x) * s, dy = ay - (A0[1] - TAXI.y) * s, dw = TAXI.w * s, dh = TAXI.h * s;
+    var sx = c.kind * TAXI.w;
     ctx.save();
     ctx.globalAlpha = a;
-    ctx.imageSmoothingEnabled = s < 0.98;
-    var dx = ax - (A0[0] - TAXI.x) * s, dy = ay - (A0[1] - TAXI.y) * s, dw = TAXI.w * s, dh = TAXI.h * s;
-    if (shade > 0.01) {
-      var tw = Math.ceil(dw), th = Math.ceil(dh);
-      if (tmp.width < tw || tmp.height < th) {
-        tmp.width = Math.max(tmp.width, tw);
-        tmp.height = Math.max(tmp.height, th);
-      }
-      tctx.globalCompositeOperation = "source-over";
-      tctx.clearRect(0, 0, tmp.width, tmp.height);
-      tctx.drawImage(imgs.cars, c.kind * TAXI.w, 0, TAXI.w, TAXI.h, 0, 0, dw, dh);
-      tctx.globalCompositeOperation = "source-atop";
-      tctx.fillStyle = "rgba(6,9,16," + (shade * 0.92).toFixed(3) + ")";
-      tctx.fillRect(0, 0, tw, th);
-      ctx.drawImage(tmp, 0, 0, dw, dh, dx, dy, dw, dh);
+    if (s < 0.16) {
+      ctx.imageSmoothingEnabled = true;
+      ctx.drawImage(imgs.cars, sx, 0, TAXI.w, TAXI.h, dx, dy, dw, dh);
+      ctx.restore();
     } else {
-      ctx.drawImage(imgs.cars, c.kind * TAXI.w, 0, TAXI.w, TAXI.h, dx, dy, dw, dh);
+      var pad = 4, tw = Math.ceil(dw) + pad * 2, th = Math.ceil(dh) + pad * 2;
+      tctx.setTransform(1, 0, 0, 1, 0, 0);
+      tctx.globalCompositeOperation = "source-over";
+      tctx.globalAlpha = 1;
+      tctx.clearRect(0, 0, tw, th);
+      tctx.imageSmoothingEnabled = s < 0.98;
+      tctx.drawImage(imgs.cars, sx, BODY_H, TAXI.w, TAXI.h - BODY_H, pad, pad + BODY_H * s, dw, (TAXI.h - BODY_H) * s);
+      var bdy = -bob * s;
+      tctx.save();
+      tctx.translate(pad + dw / 2, pad + BODY_H * s + bdy);
+      tctx.rotate(roll);
+      tctx.drawImage(imgs.cars, sx, 0, TAXI.w, BODY_H, -dw / 2, -BODY_H * s, dw, BODY_H * s);
+      tctx.restore();
+      var amb = ambientAt(ax, ay - 50 * s);
+      if (amb) {
+        var lum2 = amb[0] * 0.3 + amb[1] * 0.59 + amb[2] * 0.11;
+        tctx.globalCompositeOperation = "source-atop";
+        tctx.fillStyle = "rgba(" + Math.min(255, amb[0] * 1.6 | 0) + "," + Math.min(255, amb[1] * 1.5 | 0) + "," + Math.min(255, amb[2] * 1.5 | 0) + "," + (0.1 + 0.22 * clamp(lum2 / 110, 0, 1)).toFixed(3) + ")";
+        tctx.fillRect(0, 0, tw, th);
+        if (lum2 < 60) {
+          tctx.fillStyle = "rgba(6,10,20," + (0.22 * (1 - lum2 / 60)).toFixed(3) + ")";
+          tctx.fillRect(0, 0, tw, th);
+        }
+      }
+      if (s > 0.3) {
+        t2ctx.setTransform(1, 0, 0, 1, 0, 0);
+        t2ctx.globalCompositeOperation = "source-over";
+        t2ctx.clearRect(0, 0, tw, th);
+        t2ctx.save();
+        t2ctx.translate(pad + dw / 2, pad + BODY_H * s + bdy);
+        t2ctx.rotate(roll);
+        t2ctx.drawImage(imgs.glass, 0, 0, TAXI.w, BODY_H, -dw / 2, -BODY_H * s, dw, BODY_H * s);
+        t2ctx.restore();
+        t2ctx.globalCompositeOperation = "source-in";
+        var phase = (c.z * 1.35 + c.ph) % 1.8 / 1.8, gxp = pad + dw * (phase * 1.6 - 0.3);
+        var gr = t2ctx.createLinearGradient(gxp - 14 * s, 0, gxp + 14 * s, 0);
+        gr.addColorStop(0, "rgba(255,214,160,0)");
+        gr.addColorStop(0.5, "rgba(255,214,160,0.55)");
+        gr.addColorStop(1, "rgba(255,214,160,0)");
+        t2ctx.fillStyle = gr;
+        t2ctx.fillRect(0, 0, tw, th);
+        tctx.globalCompositeOperation = "lighter";
+        tctx.drawImage(tmp2, 0, 0, tw, th, 0, 0, tw, th);
+      }
+      if (shade > 0.01) {
+        tctx.globalCompositeOperation = "source-atop";
+        tctx.fillStyle = "rgba(6,9,16," + (shade * 0.92).toFixed(3) + ")";
+        tctx.fillRect(0, 0, tw, th);
+      }
+      ctx.drawImage(tmp, 0, 0, tw, th, dx - pad, dy - pad, tw, th);
+      ctx.restore();
+      if (moving && s > 0.25 && rnd() < 0.6 * c.v / 0.4) {
+        var ty = TYRES[rnd() * 2 | 0];
+        spray.push({ x: dx + ty[0] * s + R(-3, 3) * s, y: dy + ty[1] * s, vx: R(-6, 6) * s, vy: R(2, 7) * s, life: R(0.35, 0.7), max: 0.7, sz: s > 0.7 ? 2 : 1, a: a * (1 - shade) });
+      }
     }
-    ctx.restore();
+    var lb = -bob * s;
     ctx.save();
     ctx.globalCompositeOperation = "lighter";
     for (var k = 0; k < 2; k++) {
-      var lx = ax + (TAIL[k][0] - A0[0]) * s, ly = ay + (TAIL[k][1] - A0[1]) * s;
-      glowDot(lx, ly, Math.max(1.6, 7 * s) * (0.8 + 0.3 * brake), "255,40,25", a * (0.25 + 0.35 * brake) * (1 - shade * 0.6));
+      var lx = ax + (TAIL[k][0] - A0[0]) * s, ly = ay + (TAIL[k][1] - A0[1]) * s + lb;
+      glowDot(lx, ly, Math.max(1.6, 7 * s) * (0.8 + 0.35 * brake), "255,40,25", a * (0.25 + 0.4 * brake) * (1 - shade * 0.6) * flick);
       if (s < 0.7) {
         ctx.fillStyle = "rgba(255,70,50," + a + ")";
         ctx.fillRect(Math.round(lx), Math.round(ly), 1, 1);
       }
       var len = 6 + 34 * s, sx0 = Math.round(lx);
       for (var q = 0; q < len; q += 2) {
-        var o = Math.round(Math.sin(t2 * 3 + q * 0.5 + k) * 0.8);
-        ctx.fillStyle = "rgba(255,60,30," + a * 0.16 * (1 - q / len) * (0.6 + brake * 0.4) + ")";
+        var o = Math.round(Math.sin(t2 * 3 + q * 0.5 + k + c.ph) * 0.8);
+        ctx.fillStyle = "rgba(255,60,30," + a * 0.16 * (1 - q / len) * (0.6 + brake * 0.4) * flick + ")";
         ctx.fillRect(sx0 + o - (s > 0.5 ? 1 : 0), Math.round(ay + 2 * s + q), s > 0.5 ? 3 : 1, 2);
       }
+    }
+    ctx.restore();
+  }
+  function drawSpray() {
+    ctx.save();
+    for (var k = 0; k < spray.length; k++) {
+      var p = spray[k];
+      ctx.fillStyle = "rgba(205,215,235," + (0.22 * p.a * (p.life / p.max)).toFixed(3) + ")";
+      ctx.fillRect(Math.round(p.x), Math.round(p.y), p.sz, 1);
     }
     ctx.restore();
   }
@@ -390,9 +477,10 @@ function makeNight(wrap, canvas, urls) {
     cars = [];
     ripples = [];
     leaves = [];
+    spray = [];
     drawBase(0, false);
     [[1, 2.6, 2], [1, 2.1, 3], [0, 1, 0]].forEach(function(p) {
-      drawCar({ lane: p[0], z: p[1], v: 0, kind: p[2], vmax: 0, born: -9, brake: 1, ph: 0 }, 0);
+      drawCar({ lane: p[0], z: p[1], v: 0, kind: p[2], vmax: 0, born: -9, brake: 1, ph: 0, retune: 0, rollF: 1, bobF: 1 }, 0);
     });
     vignette();
   }
