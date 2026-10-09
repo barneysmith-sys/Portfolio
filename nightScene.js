@@ -1,4 +1,4 @@
-// ls-build/nightScene.ts
+// ls2/living-sign/nightScene.ts
 function makeNight(wrap, canvas, urls) {
   var W = 478, H = 494;
   var TAXI = { x: 209, y: 303, w: 129, h: 97 }, GLOW = { x: 207, y: 301, w: 143, h: 177 };
@@ -19,7 +19,7 @@ function makeNight(wrap, canvas, urls) {
   };
   var dead = false, raf = 0, visible = true, onScreen = true, active = true;
   var imgs = {}, pending = 5;
-  ["bg", "taxi", "glow", "signals", "masks"].forEach(function(k) {
+  ["bg", "cars", "glow", "signals", "masks"].forEach(function(k) {
     var im = new Image();
     im.onload = function() {
       if (--pending === 0) ready();
@@ -97,20 +97,19 @@ function makeNight(wrap, canvas, urls) {
     }
     sctx.putImageData(outData, 0, 0);
   }
-  var sig = { s: "red", until: R(3.5, 5) };
+  var sig = { s: "red", until: R(3.5, 5), greenAt: 0 };
   function updateSignal(t2) {
     if (t2 < sig.until) return;
     if (sig.s === "red") {
       sig.s = "green";
-      sig.until = t2 + R(12, 15);
-      taxi.goAt = t2 + R(0.7, 1.3);
+      sig.until = t2 + R(13, 17);
+      sig.greenAt = t2;
     } else if (sig.s === "green") {
       sig.s = "amber";
       sig.until = t2 + 2.6;
     } else {
       sig.s = "red";
-      sig.until = t2 + R(9, 12);
-      taxi.arriveAt = t2 + R(1.5, 3.5);
+      sig.until = t2 + R(8, 11);
     }
   }
   function glowDot(x, y, r, rgb, a) {
@@ -131,47 +130,60 @@ function makeNight(wrap, canvas, urls) {
       ctx.fillRect(s.go[0] - 1, s.go[1] - 1, 3, 2);
     }
   }
-  var taxi = { mode: "wait", z: 1, v: 0, goAt: Infinity, arriveAt: Infinity, alpha: 1, t0: 0, dur: 3 };
-  function updateTaxi(t2, dt) {
-    if (taxi.mode === "wait" && t2 > taxi.goAt) {
-      taxi.mode = "go";
-      taxi.v = 0;
-      taxi.goAt = Infinity;
-    }
-    if (taxi.mode === "go") {
-      taxi.v = Math.min(1.7, taxi.v + dt * (taxi.v < 0.3 ? 0.35 : 0.55));
-      taxi.z += taxi.v * dt;
-      taxi.alpha = clamp((13 - taxi.z) / 4, 0, 1);
-      if (taxi.z > 13) taxi.mode = "gone";
-    }
-    if (taxi.mode === "gone" && t2 > taxi.arriveAt) {
-      taxi.mode = "arrive";
-      taxi.t0 = t2;
-      taxi.arriveAt = Infinity;
-      taxi.dur = R(3, 3.8);
-    }
-    if (taxi.mode === "arrive") {
-      var u = clamp((t2 - taxi.t0) / taxi.dur, 0, 1), e = 1 - Math.pow(1 - u, 2.4);
-      taxi.z = 0.78 + 0.22 * e;
-      taxi.alpha = clamp(u / 0.35, 0, 1);
-      if (u >= 1) {
-        taxi.mode = "wait";
-        taxi.z = 1;
-        taxi.alpha = 1;
-        if (sig.s === "green") taxi.goAt = t2 + R(0.8, 1.4);
+  var STOP = 2, GAP = 1, ENTER = 0.8, FAR = 13;
+  var KINDS = [0, 0, 1, 2, 3, 4, 5], GLOWK = [1, 0.75, 0.85, 0.85, 0.85, 0.75];
+  var cars0 = [
+    { z: STOP, v: 0, kind: 1 + (rnd() * 5 | 0), vmax: R(0.85, 1.15), born: -9, brake: 1, passed: false, ph: R(0, 6) },
+    { z: 1, v: 0, kind: 0, vmax: R(0.85, 1.15), born: -9, brake: 1, passed: false, ph: R(0, 6) }
+  ];
+  var lane = cars0.slice(), nextSpawn = R(5, 7);
+  function updateLane(t2, dt) {
+    var green = sig.s === "green";
+    lane.sort(function(p, q) {
+      return q.z - p.z;
+    });
+    for (var k = 0; k < lane.length; k++) {
+      var c = lane[k], lead = k > 0 ? lane[k - 1] : null;
+      var limit = lead ? lead.z - GAP : Infinity;
+      if (!c.passed) {
+        if (green || sig.s === "amber" && c.z > STOP - 0.12 && c.v > 0.5) {
+          if (c.z >= STOP - 0.02) c.passed = true;
+        } else limit = Math.min(limit, STOP);
+        if (green && c.z >= STOP - 0.02) c.passed = true;
       }
+      var waiting = green && !c.passed && c.v < 0.05 && t2 - sig.greenAt < 0.8 + k * 0.45;
+      var room = Math.max(0, limit - c.z);
+      var vt = waiting ? 0 : Math.min(c.vmax, Math.sqrt(2 * 0.9 * room));
+      var prev = c.v;
+      c.v = vt > c.v ? Math.min(vt, c.v + dt * (c.v < 0.3 ? 0.35 : 0.55)) : Math.max(vt, c.v - dt * 1.6);
+      c.z += c.v * dt;
+      var target = c.v < 0.02 || c.v < prev - 2e-3 ? 1 : clamp(0.95 - c.v * 0.25, 0.55, 0.95);
+      c.brake += (target - c.brake) * Math.min(1, dt * 6);
+    }
+    for (k = lane.length - 1; k >= 0; k--) if (lane[k].z > FAR) lane.splice(k, 1);
+    if (t2 > nextSpawn) {
+      var back = lane.length ? lane[lane.length - 1] : null;
+      var queued = 0;
+      for (k = 0; k < lane.length; k++) if (!lane[k].passed) queued++;
+      if ((!back || back.z > ENTER + GAP + 0.05) && (green || queued < 2)) {
+        lane.push({ z: ENTER, v: green ? 0.8 : 0.6, kind: KINDS[rnd() * KINDS.length | 0], vmax: R(0.85, 1.15), born: t2, brake: 0.7, passed: false, ph: R(0, 6) });
+        nextSpawn = t2 + (green ? R(2, 3.6) : R(2.5, 4.5));
+      } else nextSpawn = t2 + 0.5;
     }
   }
-  function drawTaxi(t2) {
-    if (taxi.mode === "gone") return;
-    var s = 1 / taxi.z, a = taxi.alpha;
-    var moving = taxi.mode === "go" || taxi.mode === "arrive";
-    var bob = moving ? Math.sin(t2 * 10.5) * 0.35 * s : 0;
+  function drawLane(t2) {
+    for (var k = lane.length - 1; k >= 0; k--) drawCar(lane[k], t2);
+  }
+  function drawCar(c, t2) {
+    var s = 1 / c.z;
+    var a = clamp((t2 - c.born) / 0.9, 0, 1) * clamp((FAR - c.z) / 4, 0, 1);
+    if (a <= 0) return;
+    var bob = c.v > 0.05 ? Math.sin(t2 * 10.5 + c.ph) * 0.35 * s : 0;
     var ax = VP[0] + (A0[0] - VP[0]) * s, ay = VP[1] + (A0[1] - VP[1]) * s + bob;
-    var brake = taxi.mode === "wait" ? 1 : taxi.mode === "arrive" ? 0.6 + 0.4 * clamp((t2 - taxi.t0) / taxi.dur, 0, 1) : clamp(0.95 - taxi.v * 0.25, 0.55, 0.95);
+    var brake = c.brake, gk = GLOWK[c.kind];
     ctx.save();
     ctx.globalCompositeOperation = "lighter";
-    ctx.globalAlpha = a * (0.55 + 0.45 * brake);
+    ctx.globalAlpha = a * gk * (0.55 + 0.45 * brake);
     var gx = ax - (A0[0] - GLOW.x) * s, gy = ay - (A0[1] - GLOW.y) * s, gw = GLOW.w * s;
     var rows = Math.round(GLOW.h / 2);
     for (var r = 0; r < rows; r++) {
@@ -183,7 +195,7 @@ function makeNight(wrap, canvas, urls) {
     ctx.save();
     ctx.globalAlpha = a;
     ctx.imageSmoothingEnabled = s < 0.98;
-    ctx.drawImage(imgs.taxi, ax - (A0[0] - TAXI.x) * s, ay - (A0[1] - TAXI.y) * s, TAXI.w * s, TAXI.h * s);
+    ctx.drawImage(imgs.cars, c.kind * TAXI.w, 0, TAXI.w, TAXI.h, ax - (A0[0] - TAXI.x) * s, ay - (A0[1] - TAXI.y) * s, TAXI.w * s, TAXI.h * s);
     ctx.restore();
     ctx.save();
     ctx.globalCompositeOperation = "lighter";
@@ -368,7 +380,7 @@ function makeNight(wrap, canvas, urls) {
     last = now;
     t += dt;
     updateSignal(t);
-    updateTaxi(t, dt);
+    updateLane(t, dt);
     updateCars(t, dt);
     updateWeather(t, dt);
     updateWindows(t, dt);
@@ -377,7 +389,7 @@ function makeNight(wrap, canvas, urls) {
     drawWindows();
     drawSignals();
     drawCars();
-    drawTaxi(t);
+    drawLane(t);
     drawWeather(t);
     vignette();
     schedule();
@@ -390,15 +402,12 @@ function makeNight(wrap, canvas, urls) {
       out32.set(src32);
       sctx.putImageData(outData, 0, 0);
     }
-    taxi.mode = "wait";
-    taxi.z = 1;
-    taxi.alpha = 1;
     sig.s = "red";
     cars = [];
     ripples = [];
     leaves = [];
     drawBase(0, false);
-    drawTaxi(0);
+    drawCar({ z: 1, v: 0, kind: 0, vmax: 0, born: -9, brake: 1, passed: false, ph: 0 }, 0);
     vignette();
   }
   function start() {
