@@ -142,15 +142,14 @@
   }
   .mark {
     position: relative;
-    display: flex;
-    justify-content: center;
-    align-items: flex-start;
+    display: grid;
+    justify-items: center;
     width: 100%;
     margin: 0.7rem auto 0.95rem;
   }
   .scene-day,
   .scene-night {
-    flex: none;
+    grid-area: 1 / 1;
     transition: opacity 600ms ease;
   }
   .scene-day {
@@ -164,8 +163,9 @@
     position: absolute;
     left: 50%;
     top: 0;
-    width: min(836px, calc(100vw - 48px));
-    aspect-ratio: 836 / 470;
+    bottom: 0;
+    width: min(600px, calc(100vw - 48px));
+    overflow: hidden;
     opacity: 0;
     pointer-events: none;
     transform: translateX(-50%);
@@ -177,19 +177,11 @@
     mask-repeat: no-repeat;
   }
   [data-theme="dark"] .scene-day {
-    position: absolute;
-    left: 50%;
-    top: 0;
     opacity: 0;
     pointer-events: none;
-    transform: translateX(-50%);
   }
   [data-theme="dark"] .scene-night {
-    position: relative;
-    left: auto;
-    top: auto;
     opacity: 1;
-    transform: none;
   }
   .mark .layer {
     position: absolute;
@@ -222,7 +214,8 @@
     display: block;
     width: 100%;
     height: 100%;
-    object-fit: contain;
+    object-fit: cover;
+    object-position: center center;
   }
   p { margin: 0; }
   .copy p + p { margin-top: 0.9em; }
