@@ -1,4 +1,4 @@
-// ls2/living-sign/nightScene.ts
+// ls3/living-sign/nightScene.ts
 function makeNight(wrap, canvas, urls) {
   var W = 478, H = 494;
   var TAXI = { x: 209, y: 303, w: 129, h: 97 }, GLOW = { x: 207, y: 301, w: 143, h: 177 };
@@ -97,21 +97,7 @@ function makeNight(wrap, canvas, urls) {
     }
     sctx.putImageData(outData, 0, 0);
   }
-  var sig = { s: "red", until: R(3.5, 5), greenAt: 0 };
-  function updateSignal(t2) {
-    if (t2 < sig.until) return;
-    if (sig.s === "red") {
-      sig.s = "green";
-      sig.until = t2 + R(13, 17);
-      sig.greenAt = t2;
-    } else if (sig.s === "green") {
-      sig.s = "amber";
-      sig.until = t2 + 2.6;
-    } else {
-      sig.s = "red";
-      sig.until = t2 + R(8, 11);
-    }
-  }
+  var sig = { s: "green" };
   function glowDot(x, y, r, rgb, a) {
     var g = ctx.createRadialGradient(x, y, 0, x, y, r);
     g.addColorStop(0, "rgba(" + rgb + "," + a + ")");
@@ -130,61 +116,73 @@ function makeNight(wrap, canvas, urls) {
       ctx.fillRect(s.go[0] - 1, s.go[1] - 1, 3, 2);
     }
   }
-  var STOP = 2, GAP = 1, ENTER = 0.8, FAR = 13;
+  var ENTER = 0.6, GAP = 0.6, FAR = 14;
+  var tmp = document.createElement("canvas"), tctx = tmp.getContext("2d");
+  var LANE_X = [0, -133];
   var KINDS = [0, 0, 1, 2, 3, 4, 5], GLOWK = [1, 0.75, 0.85, 0.85, 0.85, 0.75];
-  var cars0 = [
-    { z: STOP, v: 0, kind: 1 + (rnd() * 5 | 0), vmax: R(0.85, 1.15), born: -9, brake: 1, passed: false, ph: R(0, 6) },
-    { z: 1, v: 0, kind: 0, vmax: R(0.85, 1.15), born: -9, brake: 1, passed: false, ph: R(0, 6) }
-  ];
-  var lane = cars0.slice(), nextSpawn = R(5, 7);
+  function newCar(laneIx, z, born) {
+    var v = R(0.8, 1.15);
+    return { lane: laneIx, z, v, kind: KINDS[rnd() * KINDS.length | 0], vmax: v, born, brake: 0.6, ph: R(0, 6) };
+  }
+  var traffic = [], spawnAt = [0, 0];
+  (function seed() {
+    var first = newCar(0, 1, -9);
+    first.kind = 0;
+    traffic.push(first);
+    [1.8, 2.7, 3.7, 5, 6.6, 8.5, 11, 13.3].forEach(function(z) {
+      traffic.push(newCar(0, z + R(-0.15, 0.15), -9));
+    });
+    [1.4, 2.3, 3.2, 4.4, 6, 7.9, 10, 12.6].forEach(function(z) {
+      traffic.push(newCar(1, z + R(-0.15, 0.15), -9));
+    });
+    spawnAt = [R(0.3, 1.2), R(0.8, 2)];
+  })();
   function updateLane(t2, dt) {
-    var green = sig.s === "green";
-    lane.sort(function(p, q) {
+    traffic.sort(function(p, q) {
       return q.z - p.z;
     });
-    for (var k = 0; k < lane.length; k++) {
-      var c = lane[k], lead = k > 0 ? lane[k - 1] : null;
-      var limit = lead ? lead.z - GAP : Infinity;
-      if (!c.passed) {
-        if (green || sig.s === "amber" && c.z > STOP - 0.12 && c.v > 0.5) {
-          if (c.z >= STOP - 0.02) c.passed = true;
-        } else limit = Math.min(limit, STOP);
-        if (green && c.z >= STOP - 0.02) c.passed = true;
-      }
-      var waiting = green && !c.passed && c.v < 0.05 && t2 - sig.greenAt < 0.8 + k * 0.45;
-      var room = Math.max(0, limit - c.z);
-      var vt = waiting ? 0 : Math.min(c.vmax, Math.sqrt(2 * 0.9 * room));
+    var lead = [null, null];
+    for (var k = 0; k < traffic.length; k++) {
+      var c = traffic[k], ahead = lead[c.lane];
+      var room = ahead ? Math.max(0, ahead.z - GAP - c.z) : Infinity;
+      var vt = Math.min(c.vmax, Math.sqrt(2 * 0.9 * room));
       var prev = c.v;
-      c.v = vt > c.v ? Math.min(vt, c.v + dt * (c.v < 0.3 ? 0.35 : 0.55)) : Math.max(vt, c.v - dt * 1.6);
+      c.v = vt > c.v ? Math.min(vt, c.v + dt * 0.35) : Math.max(vt, c.v - dt * 1.4);
       c.z += c.v * dt;
-      var target = c.v < 0.02 || c.v < prev - 2e-3 ? 1 : clamp(0.95 - c.v * 0.25, 0.55, 0.95);
-      c.brake += (target - c.brake) * Math.min(1, dt * 6);
+      var target = c.v < prev - 2e-3 ? 1 : 0.6;
+      c.brake += (target - c.brake) * Math.min(1, dt * 5);
+      lead[c.lane] = c;
     }
-    for (k = lane.length - 1; k >= 0; k--) if (lane[k].z > FAR) lane.splice(k, 1);
-    if (t2 > nextSpawn) {
-      var back = lane.length ? lane[lane.length - 1] : null;
-      var queued = 0;
-      for (k = 0; k < lane.length; k++) if (!lane[k].passed) queued++;
-      if ((!back || back.z > ENTER + GAP + 0.05) && (green || queued < 2)) {
-        lane.push({ z: ENTER, v: green ? 0.8 : 0.6, kind: KINDS[rnd() * KINDS.length | 0], vmax: R(0.85, 1.15), born: t2, brake: 0.7, passed: false, ph: R(0, 6) });
-        nextSpawn = t2 + (green ? R(2, 3.6) : R(2.5, 4.5));
-      } else nextSpawn = t2 + 0.5;
+    for (k = traffic.length - 1; k >= 0; k--) if (traffic[k].z > FAR) traffic.splice(k, 1);
+    for (var L = 0; L < 2; L++) {
+      if (t2 < spawnAt[L]) continue;
+      var back = null;
+      for (k = 0; k < traffic.length; k++) if (traffic[k].lane === L && (!back || traffic[k].z < back.z)) back = traffic[k];
+      if (!back || back.z > ENTER + GAP + 0.1) {
+        var nc = newCar(L, ENTER, t2);
+        if (back) nc.vmax = nc.v = Math.min(nc.v, back.v + 0.15);
+        traffic.push(nc);
+        spawnAt[L] = t2 + R(1.1, 2.6);
+      } else spawnAt[L] = t2 + 0.3;
     }
   }
   function drawLane(t2) {
-    for (var k = lane.length - 1; k >= 0; k--) drawCar(lane[k], t2);
+    for (var k = 0; k < traffic.length; k++) drawCar(traffic[k], t2);
   }
   function drawCar(c, t2) {
     var s = 1 / c.z;
-    var a = clamp((t2 - c.born) / 0.9, 0, 1) * clamp((FAR - c.z) / 4, 0, 1);
+    var a = clamp((c.z - ENTER) / 0.06, 0, 1) * clamp((FAR - c.z) / 4, 0, 1);
+    var shade = c.born < -1 ? 0 : 1 - clamp((c.z - ENTER) / 0.32, 0, 1);
+    if (c.born < -1) a = clamp((FAR - c.z) / 4, 0, 1);
     if (a <= 0) return;
     var bob = c.v > 0.05 ? Math.sin(t2 * 10.5 + c.ph) * 0.35 * s : 0;
-    var ax = VP[0] + (A0[0] - VP[0]) * s, ay = VP[1] + (A0[1] - VP[1]) * s + bob;
+    var ax = VP[0] + (A0[0] + LANE_X[c.lane] - VP[0]) * s, ay = VP[1] + (A0[1] - VP[1]) * s + bob;
     var brake = c.brake, gk = GLOWK[c.kind];
     ctx.save();
     ctx.globalCompositeOperation = "lighter";
-    ctx.globalAlpha = a * gk * (0.55 + 0.45 * brake);
+    ctx.globalAlpha = a * gk * (0.55 + 0.45 * brake) * (1 - shade);
     var gx = ax - (A0[0] - GLOW.x) * s, gy = ay - (A0[1] - GLOW.y) * s, gw = GLOW.w * s;
+    ctx.globalAlpha *= c.lane === 1 ? 0.8 : 1;
     var rows = Math.round(GLOW.h / 2);
     for (var r = 0; r < rows; r++) {
       var sy = r * 2, below = sy > A0[1] - GLOW.y - 4;
@@ -195,13 +193,29 @@ function makeNight(wrap, canvas, urls) {
     ctx.save();
     ctx.globalAlpha = a;
     ctx.imageSmoothingEnabled = s < 0.98;
-    ctx.drawImage(imgs.cars, c.kind * TAXI.w, 0, TAXI.w, TAXI.h, ax - (A0[0] - TAXI.x) * s, ay - (A0[1] - TAXI.y) * s, TAXI.w * s, TAXI.h * s);
+    var dx = ax - (A0[0] - TAXI.x) * s, dy = ay - (A0[1] - TAXI.y) * s, dw = TAXI.w * s, dh = TAXI.h * s;
+    if (shade > 0.01) {
+      var tw = Math.ceil(dw), th = Math.ceil(dh);
+      if (tmp.width < tw || tmp.height < th) {
+        tmp.width = Math.max(tmp.width, tw);
+        tmp.height = Math.max(tmp.height, th);
+      }
+      tctx.globalCompositeOperation = "source-over";
+      tctx.clearRect(0, 0, tmp.width, tmp.height);
+      tctx.drawImage(imgs.cars, c.kind * TAXI.w, 0, TAXI.w, TAXI.h, 0, 0, dw, dh);
+      tctx.globalCompositeOperation = "source-atop";
+      tctx.fillStyle = "rgba(6,9,16," + (shade * 0.92).toFixed(3) + ")";
+      tctx.fillRect(0, 0, tw, th);
+      ctx.drawImage(tmp, 0, 0, dw, dh, dx, dy, dw, dh);
+    } else {
+      ctx.drawImage(imgs.cars, c.kind * TAXI.w, 0, TAXI.w, TAXI.h, dx, dy, dw, dh);
+    }
     ctx.restore();
     ctx.save();
     ctx.globalCompositeOperation = "lighter";
     for (var k = 0; k < 2; k++) {
       var lx = ax + (TAIL[k][0] - A0[0]) * s, ly = ay + (TAIL[k][1] - A0[1]) * s;
-      glowDot(lx, ly, Math.max(1.6, 7 * s) * (0.8 + 0.3 * brake), "255,40,25", a * (0.25 + 0.35 * brake));
+      glowDot(lx, ly, Math.max(1.6, 7 * s) * (0.8 + 0.3 * brake), "255,40,25", a * (0.25 + 0.35 * brake) * (1 - shade * 0.6));
       if (s < 0.7) {
         ctx.fillStyle = "rgba(255,70,50," + a + ")";
         ctx.fillRect(Math.round(lx), Math.round(ly), 1, 1);
@@ -218,62 +232,34 @@ function makeNight(wrap, canvas, urls) {
   var cars = [], nextCar = R(1.5, 4);
   function updateCars(t2, dt) {
     if (t2 > nextCar) {
-      if (sig.s === "red") {
-        var dir = rnd() < 0.5 ? 1 : -1;
-        cars.push({ kind: "cross", x: dir > 0 ? 140 : 262, y: 339 + (dir > 0 ? 1 : -1), dir, v: R(16, 26), life: 0 });
-        nextCar = t2 + R(2.5, 7);
-      } else {
-        cars.push({ kind: "far", z: R(5, 7), v: R(0.9, 1.4), lane: rnd() < 0.5 ? -9 : 7, life: 0, oncoming: rnd() < 0.4 });
-        nextCar = t2 + R(6, 12);
-      }
+      var dir = rnd() < 0.5 ? 1 : -1;
+      cars.push({ kind: "cross", x: dir > 0 ? 143 + R(-3, 3) : 257 + R(-3, 3), y: 339 + (dir > 0 ? 1 : -1), dir, v: 0, life: 0, dur: R(7, 13) });
+      nextCar = t2 + R(5, 10);
     }
     for (var k = cars.length - 1; k >= 0; k--) {
       var c = cars[k];
       c.life += dt;
-      if (c.kind === "cross") {
-        c.x += c.dir * c.v * dt;
-        if (c.x < 130 || c.x > 272) cars.splice(k, 1);
-      } else {
-        c.z += (c.oncoming ? -0.35 : 1) * c.v * dt;
-        if (c.z > 22 || c.z < 3.2 || c.life > 14) cars.splice(k, 1);
-      }
+      if (c.life > c.dur) cars.splice(k, 1);
     }
   }
   function drawCars() {
     ctx.save();
     for (var k = 0; k < cars.length; k++) {
-      var c = cars[k], fade;
-      if (c.kind === "cross") {
-        fade = clamp(Math.min(c.x - 130, 272 - c.x) / 18, 0, 1);
-        var x = Math.round(c.x), y = c.y;
-        ctx.globalAlpha = fade;
-        ctx.fillStyle = "rgb(22,22,30)";
-        ctx.fillRect(x - 3, y - 1, 6, 2);
-        ctx.globalCompositeOperation = "lighter";
-        glowDot(x + 3 * c.dir, y, 3, "255,230,170", 0.5 * fade);
-        ctx.fillStyle = "rgba(255,240,200," + fade + ")";
-        ctx.fillRect(x + 3 * c.dir, y, 1, 1);
-        ctx.fillStyle = "rgba(255,50,30," + 0.8 * fade + ")";
-        ctx.fillRect(x - 3 * c.dir - (c.dir > 0 ? 1 : 0), y, 1, 1);
-        ctx.fillStyle = "rgba(255,220,150," + 0.12 * fade + ")";
-        ctx.fillRect(x + 3 * c.dir, y + 2, 1, 5);
-        ctx.globalCompositeOperation = "source-over";
-      } else {
-        var s = 1 / c.z;
-        fade = clamp(c.life / 1.2, 0, 1) * clamp((22 - c.z) / 6, 0, 1) * clamp((c.z - 3.2) / 0.8, 0, 1);
-        var cx = VP[0] + (A0[0] - VP[0] + c.lane * 3) * s, cy = VP[1] + (A0[1] - VP[1]) * s;
-        var spread = Math.max(1, 70 * s), col = c.oncoming ? "255,236,190" : "255,45,30";
-        ctx.globalCompositeOperation = "lighter";
-        for (var q = -1; q <= 1; q += 2) {
-          var lx = cx + q * spread / 2;
-          glowDot(lx, cy, Math.max(1.4, 12 * s), col, 0.45 * fade);
-          ctx.fillStyle = "rgba(" + col + "," + fade + ")";
-          ctx.fillRect(Math.round(lx), Math.round(cy), 1, 1);
-          ctx.fillStyle = "rgba(" + col + "," + 0.12 * fade + ")";
-          ctx.fillRect(Math.round(lx), Math.round(cy) + 2, 1, Math.round(4 + 30 * s));
-        }
-        ctx.globalCompositeOperation = "source-over";
-      }
+      var c = cars[k];
+      var fade = clamp(Math.min(c.life, c.dur - c.life) / 1.2, 0, 1);
+      var x = Math.round(c.x), y = c.y;
+      ctx.globalAlpha = fade;
+      ctx.fillStyle = "rgb(22,22,30)";
+      ctx.fillRect(x - 3, y - 1, 6, 2);
+      ctx.globalCompositeOperation = "lighter";
+      glowDot(x + 3 * c.dir, y, 3, "255,230,170", 0.5 * fade);
+      ctx.fillStyle = "rgba(255,240,200," + fade + ")";
+      ctx.fillRect(x + 3 * c.dir, y, 1, 1);
+      ctx.fillStyle = "rgba(255,50,30," + 0.8 * fade + ")";
+      ctx.fillRect(x - 3 * c.dir - (c.dir > 0 ? 1 : 0), y, 1, 1);
+      ctx.fillStyle = "rgba(255,220,150," + 0.12 * fade + ")";
+      ctx.fillRect(x + 3 * c.dir, y + 2, 1, 5);
+      ctx.globalCompositeOperation = "source-over";
     }
     ctx.globalAlpha = 1;
     ctx.restore();
@@ -379,7 +365,6 @@ function makeNight(wrap, canvas, urls) {
     var dt = last ? Math.min(0.05, (now - last) / 1e3) : 0.016;
     last = now;
     t += dt;
-    updateSignal(t);
     updateLane(t, dt);
     updateCars(t, dt);
     updateWeather(t, dt);
@@ -402,12 +387,13 @@ function makeNight(wrap, canvas, urls) {
       out32.set(src32);
       sctx.putImageData(outData, 0, 0);
     }
-    sig.s = "red";
     cars = [];
     ripples = [];
     leaves = [];
     drawBase(0, false);
-    drawCar({ z: 1, v: 0, kind: 0, vmax: 0, born: -9, brake: 1, passed: false, ph: 0 }, 0);
+    [[1, 2.6, 2], [1, 2.1, 3], [0, 1, 0]].forEach(function(p) {
+      drawCar({ lane: p[0], z: p[1], v: 0, kind: p[2], vmax: 0, born: -9, brake: 1, ph: 0 }, 0);
+    });
     vignette();
   }
   function start() {
