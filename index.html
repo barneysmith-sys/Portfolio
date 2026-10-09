@@ -142,20 +142,55 @@
   }
   .mark {
     position: relative;
-    width: min(13.5rem, 62%);
-    aspect-ratio: 442 / 444;
+    display: flex;
+    justify-content: center;
+    align-items: flex-start;
+    width: 100%;
     margin: 0.7rem auto 0.95rem;
   }
-  .scene {
-    position: absolute;
-    inset: 0;
-    pointer-events: none;
+  .scene-day,
+  .scene-night {
+    flex: none;
     transition: opacity 600ms ease;
   }
-  .scene-day { opacity: 1; }
-  .scene-night { opacity: 0; }
-  [data-theme="dark"] .scene-day { opacity: 0; }
-  [data-theme="dark"] .scene-night { opacity: 1; }
+  .scene-day {
+    position: relative;
+    width: min(13.5rem, 62%);
+    aspect-ratio: 442 / 444;
+    opacity: 1;
+    pointer-events: auto;
+  }
+  .scene-night {
+    position: absolute;
+    left: 50%;
+    top: 0;
+    width: min(836px, calc(100vw - 48px));
+    aspect-ratio: 836 / 470;
+    opacity: 0;
+    pointer-events: none;
+    transform: translateX(-50%);
+    -webkit-mask-image: url("living-sign/assets/night_mask.png");
+    -webkit-mask-size: 100% 100%;
+    -webkit-mask-repeat: no-repeat;
+    mask-image: url("living-sign/assets/night_mask.png");
+    mask-size: 100% 100%;
+    mask-repeat: no-repeat;
+  }
+  [data-theme="dark"] .scene-day {
+    position: absolute;
+    left: 50%;
+    top: 0;
+    opacity: 0;
+    pointer-events: none;
+    transform: translateX(-50%);
+  }
+  [data-theme="dark"] .scene-night {
+    position: relative;
+    left: auto;
+    top: auto;
+    opacity: 1;
+    transform: none;
+  }
   .mark .layer {
     position: absolute;
     inset: 0;
@@ -181,11 +216,13 @@
     width: 147.511%;
     height: 138.288%;
   }
-  .night-canvas {
-    left: -4.072%;
-    top: -5.631%;
-    width: 108.145%;
-    height: 111.261%;
+  .scene-night video {
+    position: absolute;
+    inset: 0;
+    display: block;
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
   }
   p { margin: 0; }
   .copy p + p { margin-top: 0.9em; }
@@ -227,14 +264,16 @@
   </header>
 
   <div class="mark" id="living-sign" role="img" aria-label="Illustration of a W 64 St street sign on a black lamppost under autumn leaves, with a small sparrow perched on the sign">
-    <div class="scene scene-day">
+    <div class="scene scene-day" id="day-wrap" aria-hidden="true">
       <img class="layer" src="living-sign/assets/foliage.png" alt="">
       <img class="layer" src="living-sign/assets/static.png" alt="">
-      <canvas id="day-canvas" class="day-canvas" aria-hidden="true"></canvas>
+      <canvas id="day-canvas" class="day-canvas"></canvas>
     </div>
-    <div class="scene scene-night">
-      <img class="layer" src="living-sign/assets/night_bg.png" alt="">
-      <canvas id="night-canvas" class="night-canvas" aria-hidden="true"></canvas>
+    <div class="scene scene-night" id="night-wrap" aria-hidden="true">
+      <video id="night-video" muted loop playsinline webkit-playsinline preload="auto" disablepictureinpicture poster="living-sign/assets/night_poster.jpg">
+        <source src="living-sign/assets/night.webm" type="video/webm">
+        <source src="living-sign/assets/night.mp4" type="video/mp4">
+      </video>
     </div>
   </div>
 
@@ -271,34 +310,58 @@
 </script>
 <script type="module">
 import { makeScene } from "./livingScene.js";
-import { makeNight } from "./nightScene.js";
 
 var wrap = document.getElementById("living-sign");
-var day = makeScene(wrap, document.getElementById("day-canvas"), {
+var dayWrap = document.getElementById("day-wrap");
+var nightWrap = document.getElementById("night-wrap");
+var video = document.getElementById("night-video");
+var day = makeScene(dayWrap, document.getElementById("day-canvas"), {
   foliage: "living-sign/assets/foliage.png",
   stat: "living-sign/assets/static.png",
   atlas: "living-sign/assets/bird_atlas.png"
 });
-var night = makeNight(wrap, document.getElementById("night-canvas"), {
-  bg: "living-sign/assets/night_bg.png",
-  cars: "living-sign/assets/cars.png",
-  glow: "living-sign/assets/taxi_glow.png",
-  signals: "living-sign/assets/signals.png",
-  masks: "living-sign/assets/night_masks.png",
-  glass: "living-sign/assets/car_glass.png"
-});
 var DAY_LABEL = "Illustration of a W 64 St street sign on a black lamppost under autumn leaves, with a small sparrow perched on the sign";
-var NIGHT_LABEL = "Pixel-art illustration of a rainy Manhattan street at night, a yellow taxi pulling away under the skyline";
-var sleepTimer = 0;
+var NIGHT_LABEL = "View of the Manhattan skyline at night from a rainy fire escape, apartment lights turning on and off across the city";
+var dayTimer = 0;
+var nightTimer = 0;
+var onScreen = true;
+var reducedMq = window.matchMedia("(prefers-reduced-motion: reduce)");
+video.muted = true;
+video.defaultMuted = true;
+function themeIsDark() {
+  return document.documentElement.getAttribute("data-theme") === "dark";
+}
+function syncVideo() {
+  if (reducedMq.matches) {
+    video.pause();
+    try { if (video.currentTime > 0) video.currentTime = 0; } catch (e) {}
+    return;
+  }
+  if (themeIsDark() && !document.hidden && onScreen) video.play().catch(function () {});
+  else video.pause();
+}
 function syncScenes(theme) {
   var dark = theme === "dark";
-  var on = dark ? night : day;
-  var off = dark ? day : night;
   wrap.setAttribute("aria-label", dark ? NIGHT_LABEL : DAY_LABEL);
-  on.setActive(true);
-  window.clearTimeout(sleepTimer);
-  sleepTimer = window.setTimeout(function () { off.setActive(false); }, 650);
+  window.clearTimeout(dayTimer);
+  window.clearTimeout(nightTimer);
+  if (dark) {
+    dayTimer = window.setTimeout(function () { day.setActive(false); }, 650);
+    syncVideo();
+  } else {
+    day.setActive(true);
+    nightTimer = window.setTimeout(syncVideo, 650);
+  }
 }
+if ("IntersectionObserver" in window) {
+  new IntersectionObserver(function (entries) {
+    onScreen = entries[0].isIntersecting;
+    syncVideo();
+  }).observe(nightWrap);
+}
+document.addEventListener("visibilitychange", syncVideo);
+video.addEventListener("canplay", syncVideo);
+if (reducedMq.addEventListener) reducedMq.addEventListener("change", syncVideo);
 syncScenes(document.documentElement.getAttribute("data-theme") || "light");
 document.addEventListener("themechange", function (event) { syncScenes(event.detail); });
 </script>

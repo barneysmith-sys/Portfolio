@@ -1,4 +1,4 @@
-// ls-build/livingScene.ts
+// ../tmp/ls5/living-sign/livingScene.ts
 function makeScene(wrap, canvas, urls) {
   var SW = 442, SH = 444;
   var ML = 40, MR = 170, MT = 150, MB = 20;
@@ -141,7 +141,7 @@ function makeScene(wrap, canvas, urls) {
     var base = windAt(t2), baseL = windAt(t2 - 0.6), baseB = windAt(t2 - 0.35);
     var cw = Math.ceil(SW / 5), flt = new Float32Array(cellPh.length), w2 = t2 * 2.3;
     for (i = 0; i < flt.length; i++) flt[i] = Math.sin(w2 + cellPh[i]) + 0.5 * Math.sin(w2 * 1.7 + cellPh[i] * 2.3);
-    var flAmp = 0.55 + gustLevel * 0.9;
+    var flAmp = (0.55 + gustLevel * 0.9) * 1.25;
     for (y = 0; y < SH; y++) {
       var wTop = clamp((230 - y) / 60, 0, 1), cy = y / 5 | 0;
       for (x = 0; x < SW; x++) {
@@ -152,7 +152,7 @@ function makeScene(wrap, canvas, urls) {
           continue;
         }
         var b = x < 150 ? baseL : wTop * base + (1 - wTop) * baseB;
-        var S = f * (b * 1.05 - colG[x] * 1.6);
+        var S = f * (b * 1.05 - colG[x] * 1.6) * 1.25;
         var fl = flt[cy * cw + (x / 5 | 0)] * flAmp * edgeF[i] * Math.sqrt(f);
         var dx = S + fl, dy = S * rigid[i * 2 + 1] * 0.9 + fl * 0.35;
         var sx = x - dx + 0.5 | 0, sy = y - dy + 0.5 | 0;
