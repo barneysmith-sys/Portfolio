@@ -489,7 +489,13 @@ function makeScene(wrap, canvas, urls) {
     bctx.restore();
     if (B.wing >= 0) bctx.drawImage(at, (3 + B.wing) * FW, 0, FW, FH, 0, dy, FW, FH);
     var bx = B.x + ML + 38, by = B.y + MT + B.hop + 28;
-    var a = clamp(Math.min(bx + 20, CW - bx, by + 10, CH - by) / 55, 0, 1);
+    var edge = clamp(Math.min(bx + 20, CW - bx, by + 10, CH - by) / 55, 0, 1);
+    var enter = Math.min(
+      clamp((SW + 6 - B.x) / 48, 0, 1),
+      clamp((B.x + 24) / 36, 0, 1),
+      clamp((B.y + 8) / 28, 0, 1)
+    );
+    var a = edge * enter;
     if (a <= 0) return;
     ctx.save();
     ctx.globalAlpha = a;
