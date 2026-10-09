@@ -105,8 +105,17 @@
     width: min(13.5rem, 62%);
     aspect-ratio: 442 / 444;
     margin: 0.7rem auto 0.95rem;
-    overflow: hidden;
   }
+  .scene {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    transition: opacity 600ms ease;
+  }
+  .scene-day { opacity: 1; }
+  .scene-night { opacity: 0; }
+  [data-theme="dark"] .scene-day { opacity: 0; }
+  [data-theme="dark"] .scene-night { opacity: 1; }
   .mark .layer {
     position: absolute;
     inset: 0;
@@ -116,19 +125,27 @@
     pointer-events: none;
     user-select: none;
   }
-  .mark:has(canvas[style*="opacity: 1"]) .layer,
-  .mark:has(canvas[style*="opacity:1"]) .layer {
+  .scene:has(canvas[style*="opacity: 1"]) .layer,
+  .scene:has(canvas[style*="opacity:1"]) .layer {
     opacity: 0;
   }
   .mark canvas {
     position: absolute;
+    opacity: 0;
+    transition: opacity 0.7s ease;
+    pointer-events: none;
+  }
+  .day-canvas {
     left: -9.05%;
     top: -33.784%;
     width: 147.511%;
     height: 138.288%;
-    opacity: 0;
-    transition: opacity 0.7s ease;
-    pointer-events: none;
+  }
+  .night-canvas {
+    left: -4.072%;
+    top: -5.631%;
+    width: 108.145%;
+    height: 111.261%;
   }
   p { margin: 0; }
   .copy p + p { margin-top: 0.9em; }
@@ -169,17 +186,23 @@
     </button>
   </header>
 
-  <div class="mark" id="living-sign" role="img" aria-label="Illustration of a W 64 St street sign on a black lamppost under autumn leaves, where a small sparrow comes and goes">
-    <img class="layer" src="living-sign/assets/foliage.png" alt="">
-    <img class="layer" src="living-sign/assets/static.png" alt="">
-    <canvas id="living-canvas" aria-hidden="true"></canvas>
+  <div class="mark" id="living-sign" role="img" aria-label="Illustration of a W 64 St street sign on a black lamppost under autumn leaves, with a small sparrow perched on the sign">
+    <div class="scene scene-day">
+      <img class="layer" src="living-sign/assets/foliage.png" alt="">
+      <img class="layer" src="living-sign/assets/static.png" alt="">
+      <canvas id="day-canvas" class="day-canvas" aria-hidden="true"></canvas>
+    </div>
+    <div class="scene scene-night">
+      <img class="layer" src="living-sign/assets/night_bg.png" alt="">
+      <canvas id="night-canvas" class="night-canvas" aria-hidden="true"></canvas>
+    </div>
   </div>
 
   <div class="copy">
     <p>I’m an incoming Founder in Residence at <a href="https://www.joinef.com/" target="_blank" rel="noopener noreferrer">Entrepreneurs First</a>. I study Business, Marketing &amp; Analytics at the <a href="https://www.gwu.edu/" target="_blank" rel="noopener noreferrer">George Washington University</a>, alongside Ethics at <a href="https://www.georgetown.edu/" target="_blank" rel="noopener noreferrer">Georgetown University</a>.</p>
     <p>Previously, I’ve worked across technology, product, and design with <a href="https://www.figma.com/" target="_blank" rel="noopener noreferrer">Figma</a>, <a href="https://www.loreal.com/en/" target="_blank" rel="noopener noreferrer">L’Oréal</a>, <a href="https://www.humanx.co/" target="_blank" rel="noopener noreferrer">HumanX</a>, and <a href="https://www.hohny.gov/" target="_blank" rel="noopener noreferrer">local government</a>.</p>
     <p>At <a href="https://www.loreal.com/en/" target="_blank" rel="noopener noreferrer">L’Oréal</a>, I developed a men’s grooming product that won #1 in the U.S. and placed Top 10 globally among 242,000+ participants, representing Team USA in Paris.</p>
-    <p>I also worked as a Data Analyst in <a href="https://gssolar.powermarket.io/marketplace.html" target="_blank" rel="noopener noreferrer">renewable energy</a>, supporting projects that generated $11.5M+ in real estate value, and built Mocha, adaptive AI interview software used by 3,000+ students across 23 universities.</p>
+    <p>I also worked as a Data Analyst in <a href="https://gssolar.powermarket.io/marketplace.html" target="_blank" rel="noopener noreferrer">renewable energy</a>, supporting projects that generated $11.5M+ in real estate value, and built <a href="https://usemocha.app/" target="_blank" rel="noopener noreferrer">Mocha</a>, adaptive AI interview software used by 3,000+ students across 23 universities.</p>
   </div>
 
   <p class="social">
@@ -196,6 +219,7 @@
     var dark = theme === "dark";
     btn.setAttribute("aria-label", dark ? "Switch to light mode" : "Switch to dark mode");
     btn.setAttribute("aria-pressed", dark ? "true" : "false");
+    document.dispatchEvent(new CustomEvent("themechange", { detail: theme }));
   }
   paint(document.documentElement.getAttribute("data-theme") || "light");
   btn.addEventListener("click", function () {
@@ -207,11 +231,35 @@
 </script>
 <script type="module">
 import { makeScene } from "./livingScene.js";
-makeScene(document.getElementById("living-sign"), document.getElementById("living-canvas"), {
+import { makeNight } from "./nightScene.js";
+
+var wrap = document.getElementById("living-sign");
+var day = makeScene(wrap, document.getElementById("day-canvas"), {
   foliage: "living-sign/assets/foliage.png",
   stat: "living-sign/assets/static.png",
   atlas: "living-sign/assets/bird_atlas.png"
 });
+var night = makeNight(wrap, document.getElementById("night-canvas"), {
+  bg: "living-sign/assets/night_bg.png",
+  taxi: "living-sign/assets/taxi.png",
+  glow: "living-sign/assets/taxi_glow.png",
+  signals: "living-sign/assets/signals.png",
+  masks: "living-sign/assets/night_masks.png"
+});
+var DAY_LABEL = "Illustration of a W 64 St street sign on a black lamppost under autumn leaves, with a small sparrow perched on the sign";
+var NIGHT_LABEL = "Pixel-art illustration of a rainy Manhattan street at night, a yellow taxi pulling away under the skyline";
+var sleepTimer = 0;
+function syncScenes(theme) {
+  var dark = theme === "dark";
+  var on = dark ? night : day;
+  var off = dark ? day : night;
+  wrap.setAttribute("aria-label", dark ? NIGHT_LABEL : DAY_LABEL);
+  on.setActive(true);
+  window.clearTimeout(sleepTimer);
+  sleepTimer = window.setTimeout(function () { off.setActive(false); }, 650);
+}
+syncScenes(document.documentElement.getAttribute("data-theme") || "light");
+document.addEventListener("themechange", function (event) { syncScenes(event.detail); });
 </script>
 </body>
 </html>

@@ -1,3 +1,4 @@
+// ls-build/livingScene.ts
 function makeScene(wrap, canvas, urls) {
   var SW = 442, SH = 444;
   var ML = 40, MR = 170, MT = 150, MB = 20;
@@ -16,7 +17,8 @@ function makeScene(wrap, canvas, urls) {
   var clamp = function(v, a, b) {
     return v < a ? a : v > b ? b : v;
   };
-  var dead = false, raf = 0, visible = true, onScreen = true;
+  var dead = false, raf = 0, visible = true, onScreen = true, active = true;
+  var VISITS = false;
   var imgs = {}, pending = 3;
   ["foliage", "stat", "atlas"].forEach(function(k) {
     var im = new Image();
@@ -207,7 +209,7 @@ function makeScene(wrap, canvas, urls) {
     ctx.globalAlpha = 1;
   }
   var B = {
-    mode: "away",
+    mode: VISITS ? "away" : "perch",
     t0: 0,
     dur: 1,
     until: R(2, 4),
@@ -226,10 +228,10 @@ function makeScene(wrap, canvas, urls) {
     puff: 1,
     dy: 0,
     hop: 0,
-    nextIdle: 0,
+    nextIdle: R(2.5, 5),
     idleEnd: 0,
-    nextBlink: 3,
-    perchEnd: 0,
+    nextBlink: R(2, 4),
+    perchEnd: VISITS ? 0 : Infinity,
     path: [],
     returnAt: 0,
     hoverCool: 0,
@@ -285,7 +287,7 @@ function makeScene(wrap, canvas, urls) {
       return;
     }
     B.idleEnd = t2 + R(0.6, 2.2);
-    if (r < 0.4) {
+    if (r < 0.34) {
       B.flip = true;
     } else if (r < 0.55) {
       B.headAT = R(0.1, 0.17) * (rnd() < 0.5 ? -1 : 1);
@@ -379,7 +381,7 @@ function makeScene(wrap, canvas, urls) {
       if (s > 0.18 && s < 0.5) B.tailA = -0.18 * Math.sin((s - 0.18) / 0.32 * Math.PI);
       if (s > 0.6) {
         B.mode = "perch";
-        B.perchEnd = t2 + R(20, 35);
+        B.perchEnd = VISITS ? t2 + R(20, 35) : Infinity;
         B.nextIdle = t2 + R(0.8, 2);
       }
       return;
@@ -388,7 +390,6 @@ function makeScene(wrap, canvas, urls) {
       B.x = PERCH.x;
       B.y = PERCH.y;
       B.legs = "perch";
-      B.dy = Math.sin(t2 * 2.2) > 0.6 ? -1 : 0;
       if (B.hopSmall && t2 - B.hopSmall < 0.12) B.dy = -1;
       else B.hopSmall = 0;
       if (B.hopT) {
@@ -489,13 +490,7 @@ function makeScene(wrap, canvas, urls) {
     bctx.restore();
     if (B.wing >= 0) bctx.drawImage(at, (3 + B.wing) * FW, 0, FW, FH, 0, dy, FW, FH);
     var bx = B.x + ML + 38, by = B.y + MT + B.hop + 28;
-    var edge = clamp(Math.min(bx + 20, CW - bx, by + 10, CH - by) / 55, 0, 1);
-    var enter = Math.min(
-      clamp((SW + 6 - B.x) / 48, 0, 1),
-      clamp((B.x + 24) / 36, 0, 1),
-      clamp((B.y + 8) / 28, 0, 1)
-    );
-    var a = edge * enter;
+    var a = clamp(Math.min(bx + 20, CW - bx, by + 10, CH - by) / 55, 0, 1);
     if (a <= 0) return;
     ctx.save();
     ctx.globalAlpha = a;
@@ -528,7 +523,7 @@ function makeScene(wrap, canvas, urls) {
     drawBird();
   }
   function schedule() {
-    if (!raf && !dead && visible && onScreen && !reduce.matches) raf = requestAnimationFrame(frame);
+    if (!raf && !dead && active && visible && onScreen && !reduce.matches) raf = requestAnimationFrame(frame);
   }
   function drawStill() {
     if (folImg) {
@@ -570,7 +565,7 @@ function makeScene(wrap, canvas, urls) {
       raf = 0;
       drawStill();
     } else {
-      B.perchEnd = t + R(10, 20);
+      B.perchEnd = VISITS ? t + R(10, 20) : Infinity;
       scheduleIdle(t);
       last = 0;
       schedule();
@@ -606,7 +601,7 @@ function makeScene(wrap, canvas, urls) {
   }
   var lastBreeze = -9;
   function onMove(e) {
-    if (reduce.matches || !folCanvas) return;
+    if (!active || reduce.matches || !folCanvas) return;
     var p = toScene(e);
     if (overBird(p)) {
       if (t > B.hoverCool && !B.idleEnd && !B.hopT) {
@@ -622,11 +617,11 @@ function makeScene(wrap, canvas, urls) {
     }
   }
   function onClick(e) {
-    if (reduce.matches || !folCanvas) return;
+    if (!active || reduce.matches || !folCanvas) return;
     var p = toScene(e);
     if (!overBird(p)) return;
     var r = rnd();
-    if (r < 0.22 && t - B.clickFly > 25) {
+    if (VISITS && r < 0.22 && t - B.clickFly > 25) {
       B.clickFly = t;
       B.returnAt = t + R(6, 10);
       beginTakeoff(t, true);
@@ -643,6 +638,15 @@ function makeScene(wrap, canvas, urls) {
   wrap.addEventListener("pointermove", onMove);
   wrap.addEventListener("click", onClick);
   return {
+    setActive: function(on) {
+      active = !!on;
+      last = 0;
+      if (active) schedule();
+      else if (raf) {
+        cancelAnimationFrame(raf);
+        raf = 0;
+      }
+    },
     destroy: function() {
       dead = true;
       if (raf) cancelAnimationFrame(raf);
