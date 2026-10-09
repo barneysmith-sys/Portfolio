@@ -30,7 +30,7 @@
     --bg: #fdfdfc;
     --name: #071f64;
     --ink: #0a2268;
-    --link: #1846c4;
+    --link: #071f64;
     --moon: #071f64;
     --display: "Instrument Serif", "Iowan Old Style", Palatino, Georgia, serif;
     --text: "Source Serif 4", "Iowan Old Style", Palatino, Georgia, serif;
@@ -40,12 +40,12 @@
     --bg: #0a1019;
     --name: #f1ece7;
     --ink: #f3f3f4;
-    --link: #8eb4ee;
+    --link: #f1ece7;
     --moon: #c9e2fb;
     color-scheme: dark;
   }
   * { box-sizing: border-box; }
-  html { background: var(--bg); }
+  html { background: var(--bg); overflow-x: clip; }
   body {
     margin: 0;
     min-height: 100vh;
@@ -57,6 +57,7 @@
     line-height: 1.55;
     text-rendering: optimizeLegibility;
     -webkit-font-smoothing: antialiased;
+    overflow-x: clip;
   }
   @media (min-width: 860px) {
     body { font-size: 1.8rem; line-height: 1.48; }
@@ -104,28 +105,42 @@
   }
   .mark {
     position: relative;
-    width: min(24.5rem, 88%);
-    aspect-ratio: 417 / 463;
-    margin: 0.85rem auto 1.35rem;
+    width: min(23rem, 82%);
+    aspect-ratio: 442 / 444;
+    margin: 1.15rem auto 1.55rem;
   }
-  .mark img {
+  .mark .layer {
     position: absolute;
     inset: 0;
     width: 100%;
     height: 100%;
-    object-fit: contain;
+    object-fit: fill;
+    pointer-events: none;
     user-select: none;
   }
-  .mark-dark { display: none; }
-  [data-theme="dark"] .mark-light { display: none; }
-  [data-theme="dark"] .mark-dark { display: block; }
+  .mark:has(canvas[style*="opacity: 1"]) .layer,
+  .mark:has(canvas[style*="opacity:1"]) .layer {
+    opacity: 0;
+  }
+  .mark canvas {
+    position: absolute;
+    left: -9.05%;
+    top: -33.784%;
+    width: 147.511%;
+    height: 138.288%;
+    opacity: 0;
+    transition: opacity 0.7s ease;
+    pointer-events: none;
+    image-rendering: pixelated;
+  }
   p { margin: 0; }
   .copy p + p { margin-top: 1.35em; }
   a {
     color: var(--link);
-    font-weight: 600;
+    font-weight: 400;
     text-decoration-line: underline;
     text-decoration-thickness: 1px;
+    text-decoration-color: var(--link);
     text-underline-offset: 0.16em;
     text-decoration-skip-ink: auto;
   }
@@ -139,9 +154,9 @@
     margin-top: 2.65rem;
     font-size: 1.05em;
     color: var(--link);
-    font-weight: 600;
+    font-weight: 400;
   }
-  .social a { font-weight: 600; }
+  .social a { font-weight: 400; }
   .social span { margin: 0 0.28rem; font-weight: 400; }
   ::selection { background: color-mix(in srgb, var(--link) 28%, transparent); }
 </style>
@@ -157,20 +172,21 @@
     </button>
   </header>
 
-  <div class="mark" role="img" aria-label="A West 64th Street sign on a lamppost, with a sparrow perched on it and a tree behind">
-    <img class="mark-light" src="w64-light.png" width="417" height="461" alt="">
-    <img class="mark-dark" src="w64-dark.png" width="417" height="466" alt="">
+  <div class="mark" id="living-sign" role="img" aria-label="Illustration of a W 64 St street sign on a black lamppost under autumn leaves, where a small sparrow comes and goes">
+    <img class="layer" src="living-sign/assets/foliage.png" alt="">
+    <img class="layer" src="living-sign/assets/static.png" alt="">
+    <canvas id="living-canvas" aria-hidden="true"></canvas>
   </div>
 
   <div class="copy">
-    <p>I’m an incoming Founder in Residence at <a href="https://www.joinef.com/" target="_blank" rel="noopener noreferrer">Entrepreneurs First</a>. I study Business, Marketing &amp; Analytics at the George Washington University, alongside Ethics at Georgetown University.</p>
-    <p>Previously, I’ve worked across technology, product, and design with <a href="https://www.figma.com/" target="_blank" rel="noopener noreferrer">Figma</a>, <a href="https://www.loreal.com/" target="_blank" rel="noopener noreferrer">L’Oréal</a>, <a href="https://www.humanx.co/" target="_blank" rel="noopener noreferrer">HumanX</a>, and <a href="https://www.hohny.gov/355/Clean-Energy-Communities" target="_blank" rel="noopener noreferrer">local government</a>.</p>
-    <p>At L’Oréal, I developed a men’s grooming product that won <a href="https://gwtoday.gwu.edu/gw-students-win-us-finals-2025-loreal-brandstorm-competition" target="_blank" rel="noopener noreferrer">#1 in the U.S.</a> and placed Top 10 globally among 242,000+ participants, representing Team USA in Paris.</p>
-    <p>I also worked as a Data Analyst in renewable energy, supporting projects that generated <a href="https://gssolar.com/" target="_blank" rel="noopener noreferrer">$11.5M+</a> in real estate value, and built <a href="https://usemocha.app/" target="_blank" rel="noopener noreferrer">Mocha</a>, adaptive AI interview software used by <a href="https://usemocha.app/" target="_blank" rel="noopener noreferrer">3,000+ students across 23 universities</a>.</p>
+    <p>I’m an incoming Founder in Residence at <a href="https://www.joinef.com/" target="_blank" rel="noopener noreferrer">Entrepreneurs First</a>. I study Business, Marketing &amp; Analytics at the <a href="https://www.gwu.edu/" target="_blank" rel="noopener noreferrer">George Washington University</a>, alongside Ethics at <a href="https://www.georgetown.edu/" target="_blank" rel="noopener noreferrer">Georgetown University</a>.</p>
+    <p>Previously, I’ve worked across technology, product, and design with <a href="https://www.figma.com/" target="_blank" rel="noopener noreferrer">Figma</a>, <a href="https://www.loreal.com/en/" target="_blank" rel="noopener noreferrer">L’Oréal</a>, <a href="https://www.humanx.co/" target="_blank" rel="noopener noreferrer">HumanX</a>, and <a href="https://www.hohny.gov/" target="_blank" rel="noopener noreferrer">local government</a>.</p>
+    <p>At <a href="https://www.loreal.com/en/" target="_blank" rel="noopener noreferrer">L’Oréal</a>, I developed a men’s grooming product that won #1 in the U.S. and placed Top 10 globally among 242,000+ participants, representing Team USA in Paris.</p>
+    <p>I also worked as a Data Analyst in <a href="https://gssolar.powermarket.io/marketplace.html" target="_blank" rel="noopener noreferrer">renewable energy</a>, supporting projects that generated $11.5M+ in real estate value, and built Mocha, adaptive AI interview software used by 3,000+ students across 23 universities.</p>
   </div>
 
   <p class="social">
-    <a href="https://x.com/barneycreates" target="_blank" rel="noopener noreferrer">x</a><span aria-hidden="true">·</span><a href="https://www.linkedin.com/in/barney-smith11/" target="_blank" rel="noopener noreferrer">linkedin</a><span aria-hidden="true">·</span><a href="https://github.com/barneysmith-sys" target="_blank" rel="noopener noreferrer">github</a><span aria-hidden="true">·</span><a href="mailto:barney.smith@gwmail.gwu.edu">email</a>
+    <a href="https://x.com/barneycreates?s=11" target="_blank" rel="noopener noreferrer">x</a><span aria-hidden="true">·</span><a href="https://www.linkedin.com/in/barney-smith11/" target="_blank" rel="noopener noreferrer">linkedin</a><span aria-hidden="true">·</span><a href="https://github.com/barneysmith-sys" target="_blank" rel="noopener noreferrer">github</a><span aria-hidden="true">·</span><a href="mailto:barney.smith@gwmail.gwu.edu">email</a>
   </p>
 </main>
 <script>
@@ -191,6 +207,14 @@
     paint(next);
   });
 })();
+</script>
+<script type="module">
+import { makeScene } from "./livingScene.js";
+makeScene(document.getElementById("living-sign"), document.getElementById("living-canvas"), {
+  foliage: "living-sign/assets/foliage.png",
+  stat: "living-sign/assets/static.png",
+  atlas: "living-sign/assets/bird_atlas.png"
+});
 </script>
 </body>
 </html>
