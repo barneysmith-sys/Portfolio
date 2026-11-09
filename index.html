@@ -257,8 +257,8 @@
   ::selection { background: color-mix(in srgb, var(--link) 28%, transparent); }
   @media (max-width: 640px) {
     body {
-      font-size: 16px;
-      line-height: 1.55;
+      font-size: 14.5px;
+      line-height: 1.5;
     }
     main {
       width: calc(100% - 3rem);
@@ -266,10 +266,17 @@
     }
     .theme { margin-top: 0; }
     .mark {
-      margin-top: 1.5rem;
-      margin-bottom: 1.25rem;
+      margin-top: 1.35rem;
+      margin-bottom: 1.05rem;
     }
-    .copy p + p { margin-top: 24px; }
+    .mark-sizer { aspect-ratio: 4 / 3; }
+    .scene-day { overflow: hidden; }
+    .day-canvas {
+      object-fit: cover;
+      object-position: center center;
+    }
+    .copy p + p { margin-top: 1em; }
+    .social { margin-top: 1.05rem; }
     .scene-night {
       -webkit-mask-image: none;
       mask-image: none;
