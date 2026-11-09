@@ -13,7 +13,8 @@ var SHAPES = [
   [".#", "#-", "#."],
   [".#.", "##-", ".#."],
   [".##", "#-#", "#-."],
-  ["..#.", ".##-", "##-.", ".#.."]
+  ["..#.", ".##-", "##-.", ".#.."],
+  [".#.#.", "#####", ".##-.", "..-.."]
 ];
 var LAMPS = [[640, 425, 26], [1515, 330, 34], [745, 483, 16], [820, 510, 12], [1238, 490, 16], [1180, 520, 12]];
 var SHAFTS = [
@@ -63,7 +64,21 @@ function makePark(wrap, canvas, urls, initial) {
     rs = next;
     canvas.width = Math.round(W * rs);
     canvas.height = Math.round(H * rs);
-    if (ready) renderStill();
+    if (ready) {
+      prescale();
+      renderStill();
+    }
+  }
+  let baseS = null, canS = null;
+  function prescale() {
+    const bw = Math.round(W * rs), bh = Math.round(H * rs), ch = Math.round(600 * rs);
+    baseS = mk(bw, bh);
+    canS = mk(bw, ch);
+    const b = baseS.getContext("2d"), c = canS.getContext("2d");
+    b.imageSmoothingQuality = "high";
+    c.imageSmoothingQuality = "high";
+    b.drawImage(imgs.base, 0, 0, bw, bh);
+    c.drawImage(imgs.canopy, 0, 0, W, 600, 0, 0, bw, ch);
   }
   const ro = "ResizeObserver" in window ? new ResizeObserver(resize) : null;
   ro?.observe(wrap);
@@ -107,9 +122,28 @@ function makePark(wrap, canvas, urls, initial) {
     const dist = (px, py) => clamp(Math.hypot((px - VP.x) / 900, (py - VP.y) / 620), 0, 1);
     tiles = [];
     for (let ty = 0; ty < 600; ty += TILE) for (let tx = 0; tx < W; tx += TILE) {
-      let any = false;
-      for (let sy = ty; sy < ty + TILE && !any; sy += 6) for (let sx = tx; sx < tx + TILE && !any; sx += 6) if (sy < 600 && has(sx / 6, sy / 6)) any = true;
-      if (any) tiles.push({ x: tx, y: ty, d: dist(tx + TILE / 2, ty + TILE / 2) });
+      let n = 0, hit = 0, bark = 0;
+      for (let sy = ty; sy < ty + TILE; sy += 6) for (let sx = tx; sx < tx + TILE; sx += 6) {
+        if (sy >= 600) continue;
+        n++;
+        if (!has(sx / 6, sy / 6)) continue;
+        hit++;
+        if (data) {
+          const o = ((sy / 6 | 0) * sw + (sx / 6 | 0)) * 4;
+          if (data[o + 2] > 22 && data[o + 2] > data[o] * 0.15) bark++;
+        }
+      }
+      if (!hit) continue;
+      const cx = tx + TILE / 2, cy = ty + TILE / 2;
+      tiles.push({ x: tx, y: ty, d: dist(cx, cy), cov: hit / n, bark: hit ? bark / hit : 0, ph: noise(cx / 210, cy / 210) * 12.6, f: 0.75 + noise(cx / 330 + 40, cy / 330) * 0.6 });
+    }
+    const covAt = /* @__PURE__ */ new Map();
+    for (const tl of tiles) covAt.set(tl.y / TILE * 1e3 + tl.x / TILE, tl.cov);
+    for (const tl of tiles) {
+      let sum = 0;
+      for (let oy = -1; oy <= 1; oy++) for (let ox = -1; ox <= 1; ox++) sum += covAt.get((tl.y / TILE + oy) * 1e3 + tl.x / TILE + ox) || 0;
+      const c9 = sum / 9, u = clamp((c9 - 0.3) / 0.5, 0, 1);
+      tl.cov = (0.12 + 0.88 * u * u * (3 - 2 * u)) * Math.max(0.06, 1 - tl.bark * 3);
     }
     sources = [];
     for (let py = 2; py < sh; py += 2) for (let px = 1; px < sw; px += 2) if (has(px, py)) sources.push({ x: px * 6, y: py * 6, d: dist(px * 6, py * 6) });
@@ -147,17 +181,15 @@ function makePark(wrap, canvas, urls, initial) {
   }
   const air = [], rest = [];
   let perf = 1;
-  let nextSpawnAt = 1.6, moodSeed = R(0, 100);
-  let phase = "active";
-  let phaseUntil = R(8, 13);
-  let gustBoostUntil = 0, seenGust = -99;
-  const AIR_CAP = 9;
+  let lastSpawn = -99, moodSeed = R(0, 100);
   const smooth = (a) => a * a * (3 - 2 * a);
+  function fallMood() {
+    const m = noise(t * 0.03 + moodSeed, 3.7) * 0.75 + noise(t * 0.11 + moodSeed, 9.1) * 0.25;
+    return smooth(clamp((m - 0.14) / 0.5, 0, 1));
+  }
   const airTarget = () => {
-    if (S.density <= 0) return 0;
-    const gusting = t < gustBoostUntil;
-    const n = phase === "lull" ? 2 : 4 + Math.min(3, noise(t * 0.05 + moodSeed, 4.2) * 3.99 | 0);
-    return Math.min(AIR_CAP, Math.round((n + (gusting ? 2 : 0)) * S.density));
+    const g = clamp(gustEnv(t), 0, 1);
+    return Math.round((1 + fallMood() * 6.5 + g * 3) * S.density);
   };
   function pickColour() {
     return rnd() < 0.6 ? 2 + (rnd() * 4 | 0) : rnd() * 2 | 0;
@@ -165,12 +197,42 @@ function makePark(wrap, canvas, urls, initial) {
   function groundFor(k) {
     return 616 + Math.pow(k, 1.6) * 236 + R(-8, 10);
   }
-  function newLeaf(avoid = []) {
+  function newLeaf() {
     if (!sources.length) return null;
-    const crowded = (x) => avoid.some((a) => Math.abs(a - x) < 160);
+    if (rnd() < 0.1) {
+      const k2 = R(1.02, 1.22), sp2 = 0.75 + k2 * 0.7;
+      return {
+        x: R(80, W - 420),
+        y: -16,
+        vx: 0,
+        vy: 0,
+        k: k2,
+        spr: (4 + (rnd() * 2 | 0)) * SPR_PER_SHAPE + pickColour(),
+        ang: R(-0.6, 0.6),
+        spinBase: R(-0.4, 0.4),
+        tum: R(0, 6.28),
+        tumS: R(1.4, 2.8),
+        swing: R(0, 6.28),
+        swingW: R(1, 1.6),
+        swingA: R(20, 36) * sp2,
+        fall: R(52, 70) * sp2,
+        sp: sp2,
+        drift: R(-4, 8),
+        seed: R(0, 100),
+        spiral: 0,
+        spiralR: 0,
+        nextTwist: R(2, 5),
+        groundY: H + 40,
+        state: 0,
+        life: 1.2,
+        restFor: 0,
+        alpha: 0,
+        fade: 0
+      };
+    }
     let s = sources[rnd() * sources.length | 0];
-    for (let i = 0; i < 14 && (s.y > 470 || s.d < 0.16 || s.x > W - 220 || crowded(s.x)); i++) s = sources[rnd() * sources.length | 0];
-    if (s.y > 470 || s.d < 0.16 || crowded(s.x)) return null;
+    for (let i = 0; i < 10 && (s.y > 470 || s.d < 0.16 || s.x > W - 220); i++) s = sources[rnd() * sources.length | 0];
+    if (s.y > 470 || s.d < 0.16) return null;
     let k = clamp((s.d - 0.16) / 0.84, 0, 1) * 0.8 + R(-0.12, 0.12);
     if (rnd() < 0.12 && s.d > 0.6) k = R(0.85, 1);
     k = clamp(k, 0, 1);
@@ -183,20 +245,20 @@ function makePark(wrap, canvas, urls, initial) {
       vy: 0,
       k,
       spr: shape * SPR_PER_SHAPE + pickColour(),
-      ang: R(-0.8, 0.8),
-      spinBase: R(-0.7, 0.7),
+      ang: R(-0.6, 0.6),
+      spinBase: R(-0.5, 0.5),
       tum: R(0, 6.28),
-      tumS: R(0.8, 3.4),
+      tumS: R(1.2, 2.6),
       swing: R(0, 6.28),
-      swingW: R(0.85, 2.3),
-      swingA: R(12, 38) * sp,
-      fall: R(24, 62) * sp,
+      swingW: R(1.1, 1.9),
+      swingA: R(14, 30) * sp,
+      fall: R(30, 48) * sp,
       sp,
-      drift: R(-14, 16),
+      drift: R(-6, 6),
       seed: R(0, 100),
       spiral: 0,
       spiralR: 0,
-      nextTwist: R(2.2, 6.5),
+      nextTwist: R(2.5, 7),
       groundY: groundFor(k),
       state: 0,
       life: 0,
@@ -205,58 +267,31 @@ function makePark(wrap, canvas, urls, initial) {
       fade: 0
     };
   }
-  function release(n) {
-    const xs = [];
-    const room = Math.min(n, AIR_CAP - air.length, Math.max(0, airTarget() - air.length));
-    for (let i = 0; i < room * 5 && xs.length < room; i++) {
-      const l = newLeaf(xs);
-      if (!l) continue;
-      air.push(l);
-      xs.push(l.x);
-    }
-    if (xs.length) nextSpawnAt = t + (xs.length > 1 ? R(2.2, 4.2) : R(1.1, 2.3));
-  }
   function seedAir() {
-    const xs = [];
-    for (let i = 0; i < 4; i++) {
-      const l = newLeaf(xs);
-      if (!l) continue;
-      l.life = 1.4 + R(0, 2.2);
+    const n = Math.min(4, airTarget());
+    for (let i = 0; i < n; i++) {
+      const l = newLeaf();
+      if (!l) return;
+      l.life = 2 + R(0, 3);
       l.alpha = 1;
-      l.vy = l.fall * R(0.65, 1);
-      l.y += (l.groundY - l.y) * R(0.1, 0.5);
+      l.vy = l.fall;
+      l.y += (l.groundY - l.y) * R(0.15, 0.6);
       air.push(l);
-      xs.push(l.x);
     }
-    nextSpawnAt = R(1.5, 2.8);
   }
   function updateLeaves(dt) {
-    if (t > phaseUntil) {
-      if (phase === "active") {
-        phase = "lull";
-        phaseUntil = t + R(3.2, 5.6);
-      } else {
-        phase = "active";
-        phaseUntil = t + R(7.5, 12);
+    const gap = gustEnv(t) > 0.5 ? R(0.35, 0.8) : R(0.7, 1.9);
+    if (air.length < airTarget() && t - lastSpawn > gap && rnd() < dt * 1.6) {
+      const l = newLeaf();
+      if (l) {
+        air.push(l);
+        lastSpawn = t;
       }
-    }
-    if (gustT0 !== seenGust) {
-      seenGust = gustT0;
-      gustBoostUntil = t + R(1.8, 3.1);
-      if (t > 0.4 && air.length < airTarget()) release(Math.min(3, airTarget() - air.length));
-    }
-    const target = airTarget();
-    if (t >= nextSpawnAt && air.length < target) {
-      const deficit = target - air.length;
-      const gusting = t < gustBoostUntil;
-      const n = gusting && deficit >= 2 ? 2 + (rnd() < 0.45 ? 1 : 0) : deficit >= 2 && rnd() < 0.36 ? 2 : 1;
-      release(n);
-      if (phase === "lull") nextSpawnAt = Math.max(nextSpawnAt, t + R(2.6, 4.8));
     }
     for (let i = air.length - 1; i >= 0; i--) {
       const l = air[i];
       l.life += dt;
-      const detach = smooth(clamp(l.life / 0.95, 0, 1));
+      const detach = smooth(clamp(l.life / 1.6, 0, 1));
       l.alpha = Math.min(1, l.life / 0.9);
       if (l.fade) {
         l.alpha = Math.max(0, 1 - (l.life - l.fade) / 1.2);
@@ -266,7 +301,7 @@ function makePark(wrap, canvas, urls, initial) {
         }
       }
       const eddy = (noise(l.life * 0.35 + l.seed, l.seed) - 0.5) * 2;
-      const wantVx = (windAt(l.x) * 20 + l.drift + eddy * 16) * l.sp * detach;
+      const wantVx = (windAt(l.x) * 17 + l.drift + eddy * 12) * l.sp * detach;
       l.vx += (wantVx - l.vx) * Math.min(1, dt * 0.9);
       l.swing += l.swingW * dt;
       const sw = Math.sin(l.swing), cw = Math.cos(l.swing);
@@ -274,11 +309,11 @@ function makePark(wrap, canvas, urls, initial) {
       l.vy += (wantVy - l.vy) * Math.min(1, dt * 1.6);
       let sx = cw * l.swingA * l.swingW * detach;
       if (!l.spiral && l.life > l.nextTwist) {
-        if (rnd() < 0.55) {
+        if (rnd() < 0.45) {
           l.spiral = l.life;
-          l.spiralR = R(7, 18) * l.sp;
+          l.spiralR = R(8, 16) * l.sp;
         }
-        l.nextTwist = l.life + R(3.2, 8);
+        l.nextTwist = l.life + R(4, 9);
       }
       let tumS = l.tumS, slow = 1;
       if (l.spiral) {
@@ -297,6 +332,10 @@ function makePark(wrap, canvas, urls, initial) {
       l.tum += tumS * dt;
       if (l.x < -30 || l.x > W + 30) {
         if (!l.fade) l.fade = l.life;
+        continue;
+      }
+      if (l.y > H + 30) {
+        air.splice(i, 1);
         continue;
       }
       if (l.y >= l.groundY) {
@@ -325,10 +364,10 @@ function makePark(wrap, canvas, urls, initial) {
   function drawLeaf(l) {
     const turn = Math.cos(l.tum);
     const spr = (turn < 0 ? backs : sprites)[l.spr];
-    const size = (1 + l.k * 0.9) * cell / viewScale;
+    const size = (1.15 + l.k * 0.95) * cell / viewScale;
     const sxk = Math.sign(turn || 1) * Math.max(0.3, Math.abs(turn));
     const flat = l.state === 1 ? 0.6 : 1;
-    ctx.globalAlpha = l.alpha * (0.86 + 0.14 * l.k);
+    ctx.globalAlpha = l.alpha * (0.74 + 0.26 * Math.min(1, l.k));
     ctx.setTransform(rs, 0, 0, rs, 0, 0);
     ctx.translate(l.x, l.y);
     ctx.rotate(l.ang);
@@ -365,12 +404,12 @@ function makePark(wrap, canvas, urls, initial) {
           d[o] = 255;
           d[o + 1] = 196;
           d[o + 2] = 118;
-          d[o + 3] = 58 * lit * sun * fade * fan;
+          d[o + 3] = 70 * lit * sun * fade * fan;
         } else if (sh > 0) {
           d[o] = 52;
           d[o + 1] = 24;
           d[o + 2] = 10;
-          d[o + 3] = 50 * sh * fade * fan * (0.6 + 0.4 * sun);
+          d[o + 3] = 58 * sh * fade * fan * (0.6 + 0.4 * sun);
         } else d[o + 3] = 0;
       }
     }
@@ -381,7 +420,7 @@ function makePark(wrap, canvas, urls, initial) {
     sctx.globalCompositeOperation = "lighter";
     for (const s of SHAFTS) {
       const breathe = 0.6 + 0.4 * Math.sin(t * 0.09 + s.ph) + 0.12 * Math.sin(t * 1.3 + s.ph * 2) * (0.5 + gustEnv(t));
-      const a = 0.075 * S.sun * clamp(breathe, 0, 1.3);
+      const a = 0.088 * S.sun * clamp(breathe, 0, 1.3);
       if (a < 4e-3) continue;
       const sway = Math.sin(t * 0.21 + s.ph) * 14;
       const g = sctx.createLinearGradient(0, 0, 0, 780 / FX);
@@ -401,7 +440,7 @@ function makePark(wrap, canvas, urls, initial) {
   }
   const glints = [];
   function updateGlints() {
-    const want = 9 * S.sun * perf * (1 + gustEnv(t));
+    const want = 12 * S.sun * perf * (1 + gustEnv(t));
     if (glints.length < want && sources.length && rnd() < 0.25) {
       const s = sources[rnd() * sources.length | 0];
       if (s.d > 0.25) glints.push({ x: s.x, y: s.y, t0: t, life: R(0.5, 1.3) });
@@ -492,28 +531,187 @@ function makePark(wrap, canvas, urls, initial) {
     }
     ctx.restore();
   }
+  const SQ_PAL = {
+    // gray fur, warmed by the afternoon light so it belongs in the painting
+    T: "rgb(126,108,94)",
+    t: "rgb(162,138,114)",
+    B: "rgb(110,94,84)",
+    R: "rgb(144,100,70)",
+    D: "rgb(62,50,44)",
+    L: "rgb(196,166,130)",
+    E: "rgb(20,16,16)",
+    A: "rgb(132,80,34)",
+    a: "rgb(84,56,30)"
+  };
+  const SQ_FRAMES = {
+    sit: [".tt........", "tTTt.......", "tTDTt......", "tT.DT...BB.", ".t..TT.BBEB", "..t.TRBBBBD", "...tTRBBLL.", "....TRBBLL.", "....RBBBBL.", ".....DD.DD."],
+    eat: [".tt........", "tTTt.......", "tTDTt......", "tT.DT...BB.", ".t..TT.BBEB", "..t.TRBBBBa", "...tTRBBLLA", "....TRBBLL.", "....RBBBBL.", ".....DD.DD."],
+    look: [".tt........", "tTTt.......", "tTDTt......", "tT.DT..BB..", ".t..TTBEBB.", "..t.TRBBBB.", "...tTRBBLL.", "....TRBBLL.", "....RBBBBL.", ".....DD.DD."],
+    flick: ["..tt.......", ".tTTt......", ".tDTt......", "tTD.T...BB.", ".t..TT.BBEB", "..t.TRBBBBD", "...tTRBBLL.", "....TRBBLL.", "....RBBBBL.", ".....DD.DD."],
+    run1: ["tt...........", "tTTt......BB.", ".tTTTRRBBBEB.", "...TRBBBBBBBD", "....BLLLLBB..", "...D.......D."],
+    run2: [".tt..........", "tTTt......BB.", "..tTTRRBBBEB.", "...TRBBBBBBBD", "...DBLLLLB...", "........DD..."]
+  };
+  const SQ_PX = 3;
+  const sqSpr = {};
+  function buildSquirrel() {
+    for (const k in SQ_FRAMES) {
+      const rows = SQ_FRAMES[k], h = rows.length, w = rows[0].length, cv = mk(w, h), x = cv.getContext("2d");
+      for (let yy = 0; yy < h; yy++) for (let xx = 0; xx < w; xx++) {
+        const ch = rows[yy][xx];
+        if (ch !== ".") {
+          x.fillStyle = SQ_PAL[ch];
+          x.fillRect(xx, yy, 1, 1);
+        }
+      }
+      sqSpr[k] = cv;
+    }
+  }
+  const SQ_HOME = { x: 468, y: 794 };
+  const sq = {
+    mode: "away",
+    until: R(5, 8),
+    x: SQ_HOME.x,
+    y: SQ_HOME.y,
+    dir: 1,
+    segs: [],
+    s0: 0,
+    fx: 0,
+    fy: 0,
+    frame: "sit",
+    act: "",
+    actEnd: 0,
+    nextAct: 0,
+    sitEnd: 0,
+    leaving: false,
+    a: 0,
+    hop: 0
+  };
+  function sqPlan(tx, ty) {
+    const mx = sq.x + (tx - sq.x) * R(0.45, 0.6), my = sq.y + (ty - sq.y) * 0.5;
+    const d1 = Math.hypot(mx - sq.x, my - sq.y), d2 = Math.hypot(tx - mx, ty - my);
+    sq.segs = [{ x: mx, y: my, run: true, dur: d1 / 170 }, { x: mx, y: my, run: false, dur: R(0.4, 0.9) }, { x: tx, y: ty, run: true, dur: d2 / 170 }];
+    sq.fx = sq.x;
+    sq.fy = sq.y;
+    sq.s0 = t;
+    sq.mode = "move";
+  }
+  function updateSquirrel() {
+    if (sq.mode === "away") {
+      sq.a = 0;
+      if (t > sq.until) {
+        sq.x = SQ_HOME.x;
+        sq.y = SQ_HOME.y;
+        sq.leaving = false;
+        sqPlan(R(585, 640), R(812, 824));
+      }
+      return;
+    }
+    if (sq.mode === "move") {
+      const seg = sq.segs[0];
+      const u = clamp((t - sq.s0) / seg.dur, 0, 1);
+      sq.dir = seg.x >= sq.fx ? 1 : -1;
+      if (seg.run) {
+        const e = u < 0.5 ? 2 * u * u : 1 - Math.pow(-2 * u + 2, 2) / 2;
+        sq.x = sq.fx + (seg.x - sq.fx) * e;
+        sq.y = sq.fy + (seg.y - sq.fy) * e;
+        const ph = t * 7.5 % 1;
+        sq.frame = ph < 0.5 ? "run1" : "run2";
+        sq.hop = -Math.abs(Math.sin(ph * Math.PI * 2)) * 2.5;
+      } else {
+        sq.frame = "look";
+        sq.hop = 0;
+        sq.dir = sq.leaving ? -1 : 1;
+      }
+      const dh = Math.hypot(sq.x - SQ_HOME.x, sq.y - SQ_HOME.y);
+      sq.a = clamp(dh / 28, 0, 1);
+      if (u >= 1) {
+        sq.fx = seg.x;
+        sq.fy = seg.y;
+        sq.segs.shift();
+        sq.s0 = t;
+        if (!sq.segs.length) {
+          if (sq.leaving) {
+            sq.mode = "away";
+            sq.until = t + R(22, 40);
+          } else {
+            sq.mode = "sit";
+            sq.dir = rnd() < 0.7 ? 1 : -1;
+            sq.sitEnd = t + R(7, 12);
+            sq.nextAct = t + R(0.6, 1.4);
+            sq.act = "";
+            sq.hop = 0;
+          }
+        }
+      }
+      return;
+    }
+    sq.a = 1;
+    sq.hop = 0;
+    if (sq.act && t > sq.actEnd) {
+      sq.act = "";
+      sq.nextAct = t + R(0.7, 2);
+    }
+    if (!sq.act && t > sq.nextAct) {
+      const r = rnd();
+      sq.act = r < 0.45 ? "eat" : r < 0.7 ? "look" : r < 0.88 ? "flick" : "turn";
+      sq.actEnd = t + (sq.act === "eat" ? R(1.8, 3.4) : sq.act === "look" ? R(0.9, 1.8) : sq.act === "flick" ? 0.32 : 0.05);
+      if (sq.act === "turn") sq.dir = -sq.dir;
+    }
+    if (sq.act === "eat") {
+      sq.frame = "eat";
+      sq.hop = Math.sin(t * 38) > 0.3 ? -0.8 : 0;
+    } else if (sq.act === "look") sq.frame = "look";
+    else if (sq.act === "flick") sq.frame = t * 12 % 1 < 0.5 ? "flick" : "sit";
+    else sq.frame = "sit";
+    if (t > sq.sitEnd && !sq.act) {
+      sq.leaving = true;
+      sqPlan(SQ_HOME.x, SQ_HOME.y);
+    }
+  }
+  function drawSquirrel() {
+    if (sq.mode === "away" || sq.a <= 0) return;
+    const spr = sqSpr[sq.frame], w = spr.width * SQ_PX, h = spr.height * SQ_PX;
+    ctx.setTransform(rs, 0, 0, rs, 0, 0);
+    ctx.globalAlpha = sq.a * 0.3;
+    ctx.fillStyle = "rgb(40,20,10)";
+    ctx.beginPath();
+    ctx.ellipse(sq.x, sq.y, w * 0.38, 3.2, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.globalAlpha = sq.a;
+    ctx.translate(Math.round(sq.x), Math.round(sq.y + sq.hop));
+    if (sq.dir < 0) ctx.scale(-1, 1);
+    ctx.drawImage(spr, -w * 0.55, -h, w, h);
+    ctx.setTransform(rs, 0, 0, rs, 0, 0);
+    ctx.globalAlpha = 1;
+  }
   function drawCanopy(still) {
+    if (!canS) return;
+    const cs = canS.width / W;
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
     if (still) {
-      ctx.drawImage(imgs.canopy, 0, 0);
+      ctx.drawImage(canS, 0, 0);
+      ctx.setTransform(rs, 0, 0, rs, 0, 0);
       return;
     }
     for (let i = 0; i < tiles.length; i++) {
       const tl = tiles[i];
       const cx = tl.x + TILE / 2, cy = tl.y + TILE / 2;
-      const amp = 0.25 + 2.3 * Math.pow(tl.d, 1.4);
+      const amp = (0.5 + 4.6 * Math.pow(tl.d, 1.3)) * tl.cov;
       const w = windAt(cx);
-      const f = 0.85 + 0.35 * Math.sin(cx * 21e-4 + cy * 13e-4);
-      const sway = Math.sin(t * f + cx * 6e-3 + cy * 4e-3) * 0.55 + Math.sin(t * f * 2.3 + cx * 0.011 - cy * 7e-3) * 0.2 + w * 0.65;
-      const dx = amp * sway, dy = amp * 0.32 * Math.sin(t * f * 1.6 + cx * 8e-3);
-      ctx.drawImage(imgs.canopy, tl.x, tl.y, TILE, TILE, tl.x + dx, tl.y + dy, TILE, TILE);
+      const sway = Math.sin(t * tl.f + tl.ph) * 0.55 + Math.sin(t * tl.f * 2.1 + tl.ph * 1.7) * 0.22 + (noise(cx / 260 + t * 0.35, cy / 260) - 0.5) * 0.7 + (w - 0.45 * S.wind) * 0.9;
+      const dx = amp * sway, dy = amp * (0.3 * Math.sin(t * tl.f * 1.5 + tl.ph * 0.8) - 0.12 * Math.abs(sway));
+      ctx.drawImage(canS, tl.x * cs, tl.y * cs, TILE * cs, TILE * cs, (tl.x + dx) * cs, (tl.y + dy) * cs, TILE * cs, TILE * cs);
     }
+    ctx.setTransform(rs, 0, 0, rs, 0, 0);
   }
   function render(dt, still) {
-    ctx.setTransform(rs, 0, 0, rs, 0, 0);
+    if (!baseS) prescale();
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.globalAlpha = 1;
     ctx.globalCompositeOperation = "source-over";
     ctx.imageSmoothingEnabled = true;
-    ctx.drawImage(imgs.base, 0, 0);
+    ctx.drawImage(baseS, 0, 0);
+    ctx.setTransform(rs, 0, 0, rs, 0, 0);
     if (still) {
       ctx.drawImage(imgs.walkers, WALKERS.A.ax, 0, WALKERS.A.w, WALKERS.A.h, 984, 593, WALKERS.A.w, WALKERS.A.h);
       ctx.drawImage(imgs.walkers, WALKERS.B.ax, 0, WALKERS.B.w, WALKERS.B.h, 1008, 595, WALKERS.B.w, WALKERS.B.h);
@@ -559,6 +757,7 @@ function makePark(wrap, canvas, urls, initial) {
     ctx.globalAlpha = 1;
     for (const w of walkers) drawWalker(w, !S.walkers);
     ctx.imageSmoothingEnabled = false;
+    drawSquirrel();
     drawBird();
     ctx.imageSmoothingEnabled = true;
     for (const l of air) if (l.k >= 0.45) drawLeaf(l);
@@ -585,7 +784,7 @@ function makePark(wrap, canvas, urls, initial) {
     }
     const dt = raw * S.speed;
     t += dt;
-    windPhase += dt * (0.05 + 0.11 * Math.abs(windAt(VP.x)));
+    windPhase += dt * (0.08 + 0.16 * Math.abs(windAt(VP.x)));
     if (t > nextGust) {
       gustT0 = t;
       gustDir = rnd() < 0.72 ? 1 : -1;
@@ -596,6 +795,7 @@ function makePark(wrap, canvas, urls, initial) {
     if (S.walkers) updateWalkers(dt);
     updateGlints();
     updateBird(dt);
+    updateSquirrel();
     render(dt, false);
     schedule();
   }
@@ -621,6 +821,7 @@ function makePark(wrap, canvas, urls, initial) {
   function init() {
     if (dead) return;
     buildSprites();
+    buildSquirrel();
     scanCanopy();
     seedAir();
     ready = true;
