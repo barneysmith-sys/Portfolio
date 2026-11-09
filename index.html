@@ -274,8 +274,8 @@
       -webkit-mask-image: none;
       mask-image: none;
     }
-    .scene-night video { opacity: 0; }
-    .mark .night-canvas {
+    .scene-night video { opacity: 0.01; }
+    [data-theme="dark"] .mark .night-canvas {
       display: block;
       position: absolute;
       inset: 0;
@@ -356,7 +356,10 @@ var dayWrap = document.getElementById("day-wrap");
 var nightWrap = document.getElementById("night-wrap");
 var video = document.getElementById("night-video");
 var nightCanvas = document.getElementById("night-canvas");
-var nightCtx = nightCanvas.getContext("2d", { alpha: false });
+var nightCtx = nightCanvas.getContext("2d");
+var poster = new Image();
+poster.decoding = "async";
+poster.src = video.getAttribute("poster");
 var mobileMq = window.matchMedia("(max-width: 640px)");
 var painting = false;
 if (!video.canPlayType("video/webm")) {
@@ -383,16 +386,32 @@ video.setAttribute("webkit-playsinline", "");
 function themeIsDark() {
   return document.documentElement.getAttribute("data-theme") === "dark";
 }
-function drawNightCover() {
-  var bw = nightCanvas.width;
-  var bh = nightCanvas.height;
-  var vw = video.videoWidth;
-  var vh = video.videoHeight;
-  if (!bw || !bh || !vw || !vh) return;
-  var scale = Math.max(bw / vw, bh / vh);
-  var dw = vw * scale;
-  var dh = vh * scale;
-  nightCtx.drawImage(video, (bw - dw) / 2, (bh - dh) / 2, dw, dh);
+function drawCover(source) {
+  var w = nightCanvas.clientWidth;
+  var h = nightCanvas.clientHeight;
+  var sw = source.videoWidth || source.naturalWidth;
+  var sh = source.videoHeight || source.naturalHeight;
+  if (w < 2 || h < 2 || !sw || !sh) return false;
+  var dpr = Math.min(window.devicePixelRatio || 1, 2);
+  var bw = Math.round(w * dpr);
+  var bh = Math.round(h * dpr);
+  if (nightCanvas.width !== bw || nightCanvas.height !== bh) {
+    nightCanvas.width = bw;
+    nightCanvas.height = bh;
+  }
+  var scale = Math.max(bw / sw, bh / sh);
+  var dw = sw * scale;
+  var dh = sh * scale;
+  nightCtx.drawImage(source, (bw - dw) / 2, (bh - dh) / 2, dw, dh);
+  return true;
+}
+function showPoster() {
+  if (!mobileMq.matches || !themeIsDark()) return;
+  if (!video.paused && video.readyState >= 2) return;
+  if (poster.complete && poster.naturalWidth) drawCover(poster);
+  else poster.addEventListener("load", function () {
+    if (themeIsDark() && video.paused) drawCover(poster);
+  }, { once: true });
 }
 function paintNight() {
   if (!painting) return;
@@ -400,18 +419,7 @@ function paintNight() {
     painting = false;
     return;
   }
-  var w = nightCanvas.clientWidth;
-  var h = nightCanvas.clientHeight;
-  if (w > 1 && h > 1 && video.readyState >= 2) {
-    var dpr = Math.min(window.devicePixelRatio || 1, 2);
-    var bw = Math.round(w * dpr);
-    var bh = Math.round(h * dpr);
-    if (nightCanvas.width !== bw || nightCanvas.height !== bh) {
-      nightCanvas.width = bw;
-      nightCanvas.height = bh;
-    }
-    drawNightCover();
-  }
+  if (video.readyState >= 2) drawCover(video);
   requestAnimationFrame(paintNight);
 }
 function startPaint() {
@@ -428,8 +436,9 @@ function syncVideo() {
   }
   if (themeIsDark() && !document.hidden && onScreen) {
     video.muted = true;
+    showPoster();
     var pending = video.play();
-    if (pending && pending.then) pending.then(startPaint).catch(function () {});
+    if (pending && pending.then) pending.then(startPaint).catch(showPoster);
     else startPaint();
   } else {
     video.pause();
@@ -459,8 +468,13 @@ document.addEventListener("visibilitychange", syncVideo);
 video.addEventListener("canplay", syncVideo);
 if (reducedMq.addEventListener) reducedMq.addEventListener("change", syncVideo);
 if (mobileMq.addEventListener) mobileMq.addEventListener("change", syncVideo);
-syncScenes(document.documentElement.getAttribute("data-theme") || "light");
+function wakeScenes() {
+  syncScenes(document.documentElement.getAttribute("data-theme") || "light");
+}
+wakeScenes();
 document.addEventListener("themechange", function (event) { syncScenes(event.detail); });
+window.addEventListener("load", wakeScenes);
+window.addEventListener("pageshow", wakeScenes);
 </script>
 </body>
 </html>
