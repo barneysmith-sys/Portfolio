@@ -272,8 +272,13 @@
     .mark-sizer { aspect-ratio: 4 / 3; }
     .scene-day { overflow: hidden; }
     .day-canvas {
-      object-fit: cover;
-      object-position: center center;
+      top: 0;
+      right: auto;
+      bottom: 0;
+      left: -25%;
+      width: 150%;
+      height: 100%;
+      object-fit: fill;
     }
     .copy p + p { margin-top: 1em; }
     .social { margin-top: 1.05rem; }
