@@ -100,9 +100,6 @@
     -webkit-font-smoothing: antialiased;
     overflow-x: clip;
   }
-  @media (max-width: 640px) {
-    body { font-size: 18px; }
-  }
   main {
     width: min(34.125rem, calc(100% - 2.75rem));
     margin: 0 auto;
@@ -221,6 +218,7 @@
     width: 100%;
     height: 100%;
   }
+  .night-canvas { display: none; }
   .scene-night video {
     position: absolute;
     inset: 0;
@@ -257,6 +255,41 @@
   .social a { font-weight: 400; }
   .social span { margin: 0 0.28rem; font-weight: 400; }
   ::selection { background: color-mix(in srgb, var(--link) 28%, transparent); }
+  @media (max-width: 640px) {
+    body {
+      font-size: 16px;
+      line-height: 1.55;
+    }
+    main {
+      width: calc(100% - 3rem);
+      padding-top: 1.75rem;
+    }
+    .theme { margin-top: 0; }
+    .mark {
+      margin-top: 1.5rem;
+      margin-bottom: 1.25rem;
+    }
+    .copy p + p { margin-top: 24px; }
+    .scene-night {
+      -webkit-mask-image: none;
+      mask-image: none;
+    }
+    .scene-night video { opacity: 0; }
+    .mark .night-canvas {
+      display: block;
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      opacity: 1;
+      -webkit-mask-image: url("living-sign/assets/night_mask.png");
+      -webkit-mask-size: 100% 100%;
+      -webkit-mask-repeat: no-repeat;
+      mask-image: url("living-sign/assets/night_mask.png");
+      mask-size: 100% 100%;
+      mask-repeat: no-repeat;
+    }
+  }
 </style>
 </head>
 <body>
@@ -280,6 +313,7 @@
         <source src="living-sign/assets/night.webm" type="video/webm">
         <source src="living-sign/assets/night.mp4" type="video/mp4">
       </video>
+      <canvas id="night-canvas" class="night-canvas" aria-hidden="true"></canvas>
     </div>
   </div>
 
@@ -321,6 +355,15 @@ var wrap = document.getElementById("living-sign");
 var dayWrap = document.getElementById("day-wrap");
 var nightWrap = document.getElementById("night-wrap");
 var video = document.getElementById("night-video");
+var nightCanvas = document.getElementById("night-canvas");
+var nightCtx = nightCanvas.getContext("2d", { alpha: false });
+var mobileMq = window.matchMedia("(max-width: 640px)");
+var painting = false;
+if (!video.canPlayType("video/webm")) {
+  var webmSource = video.querySelector('source[type="video/webm"]');
+  if (webmSource) webmSource.remove();
+  video.load();
+}
 var day = makePark(dayWrap, document.getElementById("day-canvas"), {
   base: "living-sign/assets/park_base.webp",
   canopy: "living-sign/assets/park_canopy.webp",
@@ -334,17 +377,64 @@ var onScreen = true;
 var reducedMq = window.matchMedia("(prefers-reduced-motion: reduce)");
 video.muted = true;
 video.defaultMuted = true;
+video.playsInline = true;
+video.setAttribute("playsinline", "");
+video.setAttribute("webkit-playsinline", "");
 function themeIsDark() {
   return document.documentElement.getAttribute("data-theme") === "dark";
 }
+function drawNightCover() {
+  var bw = nightCanvas.width;
+  var bh = nightCanvas.height;
+  var vw = video.videoWidth;
+  var vh = video.videoHeight;
+  if (!bw || !bh || !vw || !vh) return;
+  var scale = Math.max(bw / vw, bh / vh);
+  var dw = vw * scale;
+  var dh = vh * scale;
+  nightCtx.drawImage(video, (bw - dw) / 2, (bh - dh) / 2, dw, dh);
+}
+function paintNight() {
+  if (!painting) return;
+  if (!mobileMq.matches || !themeIsDark() || video.paused) {
+    painting = false;
+    return;
+  }
+  var w = nightCanvas.clientWidth;
+  var h = nightCanvas.clientHeight;
+  if (w > 1 && h > 1 && video.readyState >= 2) {
+    var dpr = Math.min(window.devicePixelRatio || 1, 2);
+    var bw = Math.round(w * dpr);
+    var bh = Math.round(h * dpr);
+    if (nightCanvas.width !== bw || nightCanvas.height !== bh) {
+      nightCanvas.width = bw;
+      nightCanvas.height = bh;
+    }
+    drawNightCover();
+  }
+  requestAnimationFrame(paintNight);
+}
+function startPaint() {
+  if (painting || !mobileMq.matches) return;
+  painting = true;
+  requestAnimationFrame(paintNight);
+}
 function syncVideo() {
-  if (reducedMq.matches) {
+  if (reducedMq.matches && !mobileMq.matches) {
     video.pause();
+    painting = false;
     try { if (video.currentTime > 0) video.currentTime = 0; } catch (e) {}
     return;
   }
-  if (themeIsDark() && !document.hidden && onScreen) video.play().catch(function () {});
-  else video.pause();
+  if (themeIsDark() && !document.hidden && onScreen) {
+    video.muted = true;
+    var pending = video.play();
+    if (pending && pending.then) pending.then(startPaint).catch(function () {});
+    else startPaint();
+  } else {
+    video.pause();
+    painting = false;
+  }
 }
 function syncScenes(theme) {
   var dark = theme === "dark";
@@ -368,6 +458,7 @@ if ("IntersectionObserver" in window) {
 document.addEventListener("visibilitychange", syncVideo);
 video.addEventListener("canplay", syncVideo);
 if (reducedMq.addEventListener) reducedMq.addEventListener("change", syncVideo);
+if (mobileMq.addEventListener) mobileMq.addEventListener("change", syncVideo);
 syncScenes(document.documentElement.getAttribute("data-theme") || "light");
 document.addEventListener("themechange", function (event) { syncScenes(event.detail); });
 </script>
