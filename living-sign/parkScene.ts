@@ -100,6 +100,7 @@ export function makePark(wrap: HTMLElement, canvas: HTMLCanvasElement, urls: Par
   // ---------- sizing: draw in art coordinates, render at the resolution the box actually needs ----------
   function resize() {
     const r = wrap.getBoundingClientRect();
+    if (r.width < 2 || r.height < 2) return;
     const dpr = Math.min(window.devicePixelRatio || 1, 2);
     const next = clamp((r.width * dpr) / W, 0.3, 1);
     if (r.width > 0) { viewScale = r.width / W; cell = clamp(Math.sqrt(r.width / 632), 0.75, 1.4); }
@@ -708,8 +709,19 @@ export function makePark(wrap: HTMLElement, canvas: HTMLCanvasElement, urls: Par
   const onVis = () => { visible = !document.hidden; sync(); };
   document.addEventListener('visibilitychange', onVis);
   reduceMQ?.addEventListener?.('change', sync);
-  const io = 'IntersectionObserver' in window ? new IntersectionObserver((es) => { onScreen = es[0].isIntersecting; sync(); }) : null;
+  const io = 'IntersectionObserver' in window ? new IntersectionObserver((es) => {
+    const box = es[0].boundingClientRect;
+    const vh = window.innerHeight || document.documentElement.clientHeight;
+    const laidOut = box.width > 1 && box.height > 1 && box.bottom > 0 && box.top < vh;
+    onScreen = es[0].isIntersecting || laidOut;
+    sync();
+  }) : null;
   io?.observe(wrap);
+  window.addEventListener('pageshow', () => {
+    visible = !document.hidden;
+    onScreen = true;
+    sync();
+  });
   void groundShade;
 
   return {
