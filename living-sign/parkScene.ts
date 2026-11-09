@@ -9,7 +9,7 @@
  *   3. ground     dappled sun and shade sliding over the path, in perspective
  *   4. light      soft shafts of sun through the gap in the canopy, glints between leaves, warm haze
  *   5. walkers    the tiny figures near the vanishing point, walking with a two-step gait
- *   6. leaves     a few small leaves at a time that let go, rock, drift, sometimes spiral, land and fade
+ *   6. leaves     a handful of small leaves that let go, rock, drift, sometimes spiral, land and fade
  *   7. bird       now and then, a small bird crossing between the distant trees
  *
  * Framework-free. Use makePark() from React, Vue, or plain DOM.
@@ -17,7 +17,7 @@
 
 export interface ParkAssets { base: string; canopy: string; walkers: string }
 export interface ParkSettings {
-  /** leaf multiplier, 0 to 2 (1 = 0 to 6 leaves in the air, drifting between lulls and a few) */
+  /** leaf multiplier, 0 to 2 (1 = about 4 to 7 leaves in the air, with lulls and a brief gust) */
   density: number;
   /** wind strength, 0 to 2 */
   wind: number;
@@ -184,32 +184,34 @@ export function makePark(wrap: HTMLElement, canvas: HTMLCanvasElement, urls: Par
   }
 
   // ---------- leaves ----------
-  // A quiet fall: a handful of leaves at most, sometimes none. Each one lets go of the canopy, eases into
-  // its fall, rocks like a real leaf (slowing at the top of each swing), drifts with the breeze and its own
-  // little eddies, sometimes spirals, lands, rests a while and fades back into the painted leaves.
+  // A quiet afternoon: about 4 to 7 leaves in the air while the breeze is up, a short lull with one or
+  // two still falling, and a gust that briefly lifts a couple more. Each one lets go of the canopy, eases
+  // into its fall, rocks, drifts on its own eddy, sometimes spirals, lands, rests and fades.
   const air: Leaf[] = [], rest: Leaf[] = [];
   let perf = 1;
-  let lastSpawn = -99, moodSeed = R(0, 100);
+  let nextSpawnAt = 1.6, moodSeed = R(0, 100);
+  let phase: 'active' | 'lull' = 'active';
+  let phaseUntil = R(8, 13);
+  let gustBoostUntil = 0, seenGust = -99;
+  const AIR_CAP = 9;
   const smooth = (a: number) => a * a * (3 - 2 * a);
-  // how many leaves the moment wants: drifts slowly between a lull (0) and a few (about 6)
-  function fallMood() {
-    const m = noise(t * 0.03 + moodSeed, 3.7) * 0.75 + noise(t * 0.11 + moodSeed, 9.1) * 0.25;
-    return smooth(clamp((m - 0.2) / 0.55, 0, 1));
-  }
   const airTarget = () => {
-    const g = clamp(gustEnv(t), 0, 1);
-    return Math.round((fallMood() * 5.6 + g * 1.4) * S.density);
+    if (S.density <= 0) return 0;
+    const gusting = t < gustBoostUntil;
+    const n = phase === 'lull' ? 2 : 4 + Math.min(3, (noise(t * 0.05 + moodSeed, 4.2) * 3.99) | 0);
+    return Math.min(AIR_CAP, Math.round((n + (gusting ? 2 : 0)) * S.density));
   };
   // deeper reds and burnt oranges more often: they read against the gold canopy without any outline
   function pickColour() { return rnd() < 0.6 ? 2 + ((rnd() * 4) | 0) : (rnd() * 2) | 0; }
   function groundFor(k: number) { return 616 + Math.pow(k, 1.6) * 236 + R(-8, 10); }
-  function newLeaf(): Leaf | null {
+  function newLeaf(avoid: number[] = []): Leaf | null {
     if (!sources.length) return null;
     // the upper canopy only, and never from the trees right at the vanishing point
+    const crowded = (x: number) => avoid.some((a) => Math.abs(a - x) < 160);
     let s = sources[(rnd() * sources.length) | 0];
     // the breeze mostly blows left to right, so give leaves room to travel before they leave the frame
-    for (let i = 0; i < 10 && (s.y > 470 || s.d < 0.16 || s.x > W - 220); i++) s = sources[(rnd() * sources.length) | 0];
-    if (s.y > 470 || s.d < 0.16) return null;
+    for (let i = 0; i < 14 && (s.y > 470 || s.d < 0.16 || s.x > W - 220 || crowded(s.x)); i++) s = sources[(rnd() * sources.length) | 0];
+    if (s.y > 470 || s.d < 0.16 || crowded(s.x)) return null;
     // depth: mostly far and middle distance; a near leaf is rare and still small
     let k = clamp((s.d - 0.16) / 0.84, 0, 1) * 0.8 + R(-0.12, 0.12);
     if (rnd() < 0.12 && s.d > 0.6) k = R(0.85, 1);
@@ -218,37 +220,60 @@ export function makePark(wrap: HTMLElement, canvas: HTMLCanvasElement, urls: Par
     const sp = 0.75 + k * 0.7; // nearer leaves cross the frame faster
     return {
       x: s.x + R(-5, 5), y: s.y + R(0, 6), vx: 0, vy: 0, k, spr: shape * SPR_PER_SHAPE + pickColour(),
-      ang: R(-0.6, 0.6), spinBase: R(-0.5, 0.5), tum: R(0, 6.28), tumS: R(1.2, 2.6),
-      swing: R(0, 6.28), swingW: R(1.1, 1.9), swingA: R(14, 30) * sp, fall: R(30, 48) * sp, sp,
-      drift: R(-6, 6), seed: R(0, 100), spiral: 0, spiralR: 0, nextTwist: R(2.5, 7),
+      ang: R(-0.8, 0.8), spinBase: R(-0.7, 0.7), tum: R(0, 6.28), tumS: R(0.8, 3.4),
+      swing: R(0, 6.28), swingW: R(0.85, 2.3), swingA: R(12, 38) * sp, fall: R(24, 62) * sp, sp,
+      drift: R(-14, 16), seed: R(0, 100), spiral: 0, spiralR: 0, nextTwist: R(2.2, 6.5),
       groundY: groundFor(k), state: 0, life: 0, restFor: R(5, 12), alpha: 0, fade: 0,
     };
   }
-  function seedAir() {
-    // begin mid-scene with one or two already falling, not a burst
-    const n = Math.min(2, airTarget());
-    for (let i = 0; i < n; i++) {
-      const l = newLeaf(); if (!l) return;
-      l.life = 2 + R(0, 3); l.alpha = 1; l.vy = l.fall;
-      l.y += (l.groundY - l.y) * R(0.15, 0.6);
-      air.push(l);
+  function release(n: number) {
+    const xs: number[] = [];
+    const room = Math.min(n, AIR_CAP - air.length, Math.max(0, airTarget() - air.length));
+    for (let i = 0; i < room * 5 && xs.length < room; i++) {
+      const l = newLeaf(xs); if (!l) continue;
+      air.push(l); xs.push(l.x);
     }
+    if (xs.length) nextSpawnAt = t + (xs.length > 1 ? R(2.2, 4.2) : R(1.1, 2.3));
+  }
+  function seedAir() {
+    // open mid-fall, a few already on their way down from different parts of the canopy
+    const xs: number[] = [];
+    for (let i = 0; i < 4; i++) {
+      const l = newLeaf(xs); if (!l) continue;
+      l.life = 1.4 + R(0, 2.2); l.alpha = 1; l.vy = l.fall * R(0.65, 1);
+      l.y += (l.groundY - l.y) * R(0.1, 0.5);
+      air.push(l); xs.push(l.x);
+    }
+    nextSpawnAt = R(1.5, 2.8);
   }
   function updateLeaves(dt: number) {
-    // trickle, never stream: at most one new leaf every 1.4 to 3.5 seconds, and only while the mood wants more
-    if (air.length < airTarget() && t - lastSpawn > R(1.4, 3.5) && rnd() < dt * 0.8) {
-      const l = newLeaf(); if (l) { air.push(l); lastSpawn = t; }
+    if (t > phaseUntil) {
+      if (phase === 'active') { phase = 'lull'; phaseUntil = t + R(3.2, 5.6); }
+      else { phase = 'active'; phaseUntil = t + R(7.5, 12); }
+    }
+    if (gustT0 !== seenGust) {
+      seenGust = gustT0;
+      gustBoostUntil = t + R(1.8, 3.1);
+      if (t > 0.4 && air.length < airTarget()) release(Math.min(3, airTarget() - air.length));
+    }
+    const target = airTarget();
+    if (t >= nextSpawnAt && air.length < target) {
+      const deficit = target - air.length;
+      const gusting = t < gustBoostUntil;
+      const n = gusting && deficit >= 2 ? 2 + (rnd() < 0.45 ? 1 : 0) : deficit >= 2 && rnd() < 0.36 ? 2 : 1;
+      release(n);
+      if (phase === 'lull') nextSpawnAt = Math.max(nextSpawnAt, t + R(2.6, 4.8));
     }
     for (let i = air.length - 1; i >= 0; i--) {
       const l = air[i];
       l.life += dt;
       // letting go: a moment of hesitation, then the fall eases in
-      const detach = smooth(clamp(l.life / 1.6, 0, 1));
+      const detach = smooth(clamp(l.life / 0.95, 0, 1));
       l.alpha = Math.min(1, l.life / 0.9);
       if (l.fade) { l.alpha = Math.max(0, 1 - (l.life - l.fade) / 1.2); if (l.alpha <= 0) { air.splice(i, 1); continue; } }
       // the breeze, plus a slow personal eddy that now and then turns a leaf back on itself
       const eddy = (noise(l.life * 0.35 + l.seed, l.seed) - 0.5) * 2;
-      const wantVx = (windAt(l.x) * 17 + l.drift + eddy * 12) * l.sp * detach;
+      const wantVx = (windAt(l.x) * 20 + l.drift + eddy * 16) * l.sp * detach;
       l.vx += (wantVx - l.vx) * Math.min(1, dt * 0.9);
       // the falling-leaf rock: side to side, slowing and lifting slightly at the top of each swing
       l.swing += l.swingW * dt;
@@ -258,8 +283,8 @@ export function makePark(wrap: HTMLElement, canvas: HTMLCanvasElement, urls: Par
       let sx = cw * l.swingA * l.swingW * detach;
       // now and then a leaf catches the air and spirals for a couple of turns
       if (!l.spiral && l.life > l.nextTwist) {
-        if (rnd() < 0.45) { l.spiral = l.life; l.spiralR = R(8, 16) * l.sp; }
-        l.nextTwist = l.life + R(4, 9);
+        if (rnd() < 0.55) { l.spiral = l.life; l.spiralR = R(7, 18) * l.sp; }
+        l.nextTwist = l.life + R(3.2, 8);
       }
       let tumS = l.tumS, slow = 1;
       if (l.spiral) {
@@ -302,7 +327,7 @@ export function makePark(wrap: HTMLElement, canvas: HTMLCanvasElement, urls: Par
     const sxk = Math.sign(turn || 1) * Math.max(0.3, Math.abs(turn));
     const flat = l.state === 1 ? 0.6 : 1;
     // distance softens a leaf into the haze a little
-    ctx.globalAlpha = l.alpha * (0.72 + 0.28 * l.k);
+    ctx.globalAlpha = l.alpha * (0.86 + 0.14 * l.k);
     ctx.setTransform(rs, 0, 0, rs, 0, 0);
     ctx.translate(l.x, l.y);
     ctx.rotate(l.ang);

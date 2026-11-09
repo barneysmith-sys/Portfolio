@@ -147,15 +147,17 @@ function makePark(wrap, canvas, urls, initial) {
   }
   const air = [], rest = [];
   let perf = 1;
-  let lastSpawn = -99, moodSeed = R(0, 100);
+  let nextSpawnAt = 1.6, moodSeed = R(0, 100);
+  let phase = "active";
+  let phaseUntil = R(8, 13);
+  let gustBoostUntil = 0, seenGust = -99;
+  const AIR_CAP = 9;
   const smooth = (a) => a * a * (3 - 2 * a);
-  function fallMood() {
-    const m = noise(t * 0.03 + moodSeed, 3.7) * 0.75 + noise(t * 0.11 + moodSeed, 9.1) * 0.25;
-    return smooth(clamp((m - 0.2) / 0.55, 0, 1));
-  }
   const airTarget = () => {
-    const g = clamp(gustEnv(t), 0, 1);
-    return Math.round((fallMood() * 5.6 + g * 1.4) * S.density);
+    if (S.density <= 0) return 0;
+    const gusting = t < gustBoostUntil;
+    const n = phase === "lull" ? 2 : 4 + Math.min(3, noise(t * 0.05 + moodSeed, 4.2) * 3.99 | 0);
+    return Math.min(AIR_CAP, Math.round((n + (gusting ? 2 : 0)) * S.density));
   };
   function pickColour() {
     return rnd() < 0.6 ? 2 + (rnd() * 4 | 0) : rnd() * 2 | 0;
@@ -163,11 +165,12 @@ function makePark(wrap, canvas, urls, initial) {
   function groundFor(k) {
     return 616 + Math.pow(k, 1.6) * 236 + R(-8, 10);
   }
-  function newLeaf() {
+  function newLeaf(avoid = []) {
     if (!sources.length) return null;
+    const crowded = (x) => avoid.some((a) => Math.abs(a - x) < 160);
     let s = sources[rnd() * sources.length | 0];
-    for (let i = 0; i < 10 && (s.y > 470 || s.d < 0.16 || s.x > W - 220); i++) s = sources[rnd() * sources.length | 0];
-    if (s.y > 470 || s.d < 0.16) return null;
+    for (let i = 0; i < 14 && (s.y > 470 || s.d < 0.16 || s.x > W - 220 || crowded(s.x)); i++) s = sources[rnd() * sources.length | 0];
+    if (s.y > 470 || s.d < 0.16 || crowded(s.x)) return null;
     let k = clamp((s.d - 0.16) / 0.84, 0, 1) * 0.8 + R(-0.12, 0.12);
     if (rnd() < 0.12 && s.d > 0.6) k = R(0.85, 1);
     k = clamp(k, 0, 1);
@@ -180,20 +183,20 @@ function makePark(wrap, canvas, urls, initial) {
       vy: 0,
       k,
       spr: shape * SPR_PER_SHAPE + pickColour(),
-      ang: R(-0.6, 0.6),
-      spinBase: R(-0.5, 0.5),
+      ang: R(-0.8, 0.8),
+      spinBase: R(-0.7, 0.7),
       tum: R(0, 6.28),
-      tumS: R(1.2, 2.6),
+      tumS: R(0.8, 3.4),
       swing: R(0, 6.28),
-      swingW: R(1.1, 1.9),
-      swingA: R(14, 30) * sp,
-      fall: R(30, 48) * sp,
+      swingW: R(0.85, 2.3),
+      swingA: R(12, 38) * sp,
+      fall: R(24, 62) * sp,
       sp,
-      drift: R(-6, 6),
+      drift: R(-14, 16),
       seed: R(0, 100),
       spiral: 0,
       spiralR: 0,
-      nextTwist: R(2.5, 7),
+      nextTwist: R(2.2, 6.5),
       groundY: groundFor(k),
       state: 0,
       life: 0,
@@ -202,30 +205,58 @@ function makePark(wrap, canvas, urls, initial) {
       fade: 0
     };
   }
-  function seedAir() {
-    const n = Math.min(2, airTarget());
-    for (let i = 0; i < n; i++) {
-      const l = newLeaf();
-      if (!l) return;
-      l.life = 2 + R(0, 3);
-      l.alpha = 1;
-      l.vy = l.fall;
-      l.y += (l.groundY - l.y) * R(0.15, 0.6);
+  function release(n) {
+    const xs = [];
+    const room = Math.min(n, AIR_CAP - air.length, Math.max(0, airTarget() - air.length));
+    for (let i = 0; i < room * 5 && xs.length < room; i++) {
+      const l = newLeaf(xs);
+      if (!l) continue;
       air.push(l);
+      xs.push(l.x);
     }
+    if (xs.length) nextSpawnAt = t + (xs.length > 1 ? R(2.2, 4.2) : R(1.1, 2.3));
+  }
+  function seedAir() {
+    const xs = [];
+    for (let i = 0; i < 4; i++) {
+      const l = newLeaf(xs);
+      if (!l) continue;
+      l.life = 1.4 + R(0, 2.2);
+      l.alpha = 1;
+      l.vy = l.fall * R(0.65, 1);
+      l.y += (l.groundY - l.y) * R(0.1, 0.5);
+      air.push(l);
+      xs.push(l.x);
+    }
+    nextSpawnAt = R(1.5, 2.8);
   }
   function updateLeaves(dt) {
-    if (air.length < airTarget() && t - lastSpawn > R(1.4, 3.5) && rnd() < dt * 0.8) {
-      const l = newLeaf();
-      if (l) {
-        air.push(l);
-        lastSpawn = t;
+    if (t > phaseUntil) {
+      if (phase === "active") {
+        phase = "lull";
+        phaseUntil = t + R(3.2, 5.6);
+      } else {
+        phase = "active";
+        phaseUntil = t + R(7.5, 12);
       }
+    }
+    if (gustT0 !== seenGust) {
+      seenGust = gustT0;
+      gustBoostUntil = t + R(1.8, 3.1);
+      if (t > 0.4 && air.length < airTarget()) release(Math.min(3, airTarget() - air.length));
+    }
+    const target = airTarget();
+    if (t >= nextSpawnAt && air.length < target) {
+      const deficit = target - air.length;
+      const gusting = t < gustBoostUntil;
+      const n = gusting && deficit >= 2 ? 2 + (rnd() < 0.45 ? 1 : 0) : deficit >= 2 && rnd() < 0.36 ? 2 : 1;
+      release(n);
+      if (phase === "lull") nextSpawnAt = Math.max(nextSpawnAt, t + R(2.6, 4.8));
     }
     for (let i = air.length - 1; i >= 0; i--) {
       const l = air[i];
       l.life += dt;
-      const detach = smooth(clamp(l.life / 1.6, 0, 1));
+      const detach = smooth(clamp(l.life / 0.95, 0, 1));
       l.alpha = Math.min(1, l.life / 0.9);
       if (l.fade) {
         l.alpha = Math.max(0, 1 - (l.life - l.fade) / 1.2);
@@ -235,7 +266,7 @@ function makePark(wrap, canvas, urls, initial) {
         }
       }
       const eddy = (noise(l.life * 0.35 + l.seed, l.seed) - 0.5) * 2;
-      const wantVx = (windAt(l.x) * 17 + l.drift + eddy * 12) * l.sp * detach;
+      const wantVx = (windAt(l.x) * 20 + l.drift + eddy * 16) * l.sp * detach;
       l.vx += (wantVx - l.vx) * Math.min(1, dt * 0.9);
       l.swing += l.swingW * dt;
       const sw = Math.sin(l.swing), cw = Math.cos(l.swing);
@@ -243,11 +274,11 @@ function makePark(wrap, canvas, urls, initial) {
       l.vy += (wantVy - l.vy) * Math.min(1, dt * 1.6);
       let sx = cw * l.swingA * l.swingW * detach;
       if (!l.spiral && l.life > l.nextTwist) {
-        if (rnd() < 0.45) {
+        if (rnd() < 0.55) {
           l.spiral = l.life;
-          l.spiralR = R(8, 16) * l.sp;
+          l.spiralR = R(7, 18) * l.sp;
         }
-        l.nextTwist = l.life + R(4, 9);
+        l.nextTwist = l.life + R(3.2, 8);
       }
       let tumS = l.tumS, slow = 1;
       if (l.spiral) {
@@ -297,7 +328,7 @@ function makePark(wrap, canvas, urls, initial) {
     const size = (1 + l.k * 0.9) * cell / viewScale;
     const sxk = Math.sign(turn || 1) * Math.max(0.3, Math.abs(turn));
     const flat = l.state === 1 ? 0.6 : 1;
-    ctx.globalAlpha = l.alpha * (0.72 + 0.28 * l.k);
+    ctx.globalAlpha = l.alpha * (0.86 + 0.14 * l.k);
     ctx.setTransform(rs, 0, 0, rs, 0, 0);
     ctx.translate(l.x, l.y);
     ctx.rotate(l.ang);
