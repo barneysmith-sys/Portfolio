@@ -102,7 +102,7 @@ function PortfolioIllustrationImpl({ theme, className }: PortfolioIllustrationPr
       role="img"
       aria-label={dark
         ? 'View of the Manhattan skyline at night from a rainy fire escape, apartment lights turning on and off across the city'
-        : 'Pixel-art painting of The Mall in Central Park in autumn: an avenue of orange and gold trees, lamps and benches, leaves drifting down and two people walking into the distance'}
+        : 'Pixel-art painting of The Mall in Central Park in autumn: an avenue of orange and gold trees, lamps and benches, leaves drifting down, two people walking into the distance and a gray squirrel by a bench'}
       style={{ position: 'relative', display: 'flex', justifyContent: 'center' }}
     >
       <div
