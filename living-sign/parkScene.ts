@@ -9,7 +9,7 @@
  *   3. ground     dappled sun and shade sliding over the path, in perspective
  *   4. light      soft shafts of sun through the gap in the canopy, glints between leaves, warm haze
  *   5. walkers    the tiny figures near the vanishing point, walking with a two-step gait
- *   6. leaves     pixel-art leaves that detach, flutter, ride gusts, settle and tumble along the path
+ *   6. leaves     a few small leaves at a time that let go, rock, drift, sometimes spiral, land and fade
  *   7. bird       now and then, a small bird crossing between the distant trees
  *
  * Framework-free. Use makePark() from React, Vue, or plain DOM.
@@ -17,7 +17,7 @@
 
 export interface ParkAssets { base: string; canopy: string; walkers: string }
 export interface ParkSettings {
-  /** leaf count multiplier, 0 to 2 (1 = about 40 leaves in the air) */
+  /** leaf multiplier, 0 to 2 (1 = 0 to 6 leaves in the air, drifting between lulls and a few) */
   density: number;
   /** wind strength, 0 to 2 */
   wind: number;
@@ -39,10 +39,11 @@ export interface ParkScene {
 export const PARK_DEFAULTS: ParkSettings = { density: 1, wind: 1, speed: 1, sun: 1, walkers: true, animate: true };
 
 type Leaf = {
-  x: number; y: number; vx: number; vy: number; P: number; spr: number; ang: number; spin: number;
-  tum: number; tumS: number; ph: number; fw: number; amp: number; groundY: number;
-  state: 0 | 1 | 2; // 0 falling, 1 resting, 2 tumbling along the ground
-  life: number; restFor: number; fg: boolean; alpha: number;
+  x: number; y: number; vx: number; vy: number; k: number; spr: number; ang: number; spinBase: number; tum: number; tumS: number;
+  swing: number; swingW: number; swingA: number; fall: number; sp: number; drift: number; seed: number;
+  spiral: number; spiralR: number; nextTwist: number; groundY: number;
+  state: 0 | 1; // 0 falling, 1 resting on the ground
+  life: number; restFor: number; alpha: number; fade: number;
 };
 type Walker = { id: 'A' | 'B'; Z: number; X: number; dir: number; v: number; ph: number; born: number; fadeOut: number };
 type Glint = { x: number; y: number; t0: number; life: number };
@@ -53,16 +54,15 @@ const WALKERS = {
   A: { ax: 0, w: 15, h: 36, feet: 34, cx: 7.1, d0: 27, X: -0.44 },
   B: { ax: 17, w: 11, h: 31, feet: 29, cx: 4.8, d0: 24, X: 0.42 },
 };
-const PALETTE: number[][] = [
-  [250, 153, 11], [243, 110, 3], [223, 72, 2], [182, 71, 4], [160, 46, 1], [235, 185, 124], [214, 92, 18], [196, 40, 22], [242, 172, 40],
-];
-// leaf shapes in art pixels: # body, + highlight, - shade
+// sampled from the painting: golden yellow, amber, burnt orange, rust, deep red
+const PALETTE: number[][] = [[242, 168, 32], [236, 128, 14], [223, 92, 10], [205, 70, 8], [178, 54, 10], [150, 34, 14]];
+// small leaf shapes in art pixels: # body, - a slightly darker vein side (no outlines, no highlights)
 const SHAPES = [
   ['##', '#-'],
-  ['.#.', '#+#', '.#-'],
-  ['.##.', '#+##', '##-#', '.#-.'],
-  ['#.#.#', '.###.', '#+##-', '.##-.', '..#..'],
-  ['.##..', '#+##.', '.###-', '..#--'],
+  ['.#', '#-', '#.'],
+  ['.#.', '##-', '.#.'],
+  ['.##', '#-#', '#-.'],
+  ['..#.', '.##-', '##-.', '.#..'],
 ];
 const LAMPS = [[640, 425, 26], [1515, 330, 34], [745, 483, 16], [820, 510, 12], [1238, 490, 16], [1180, 520, 12]];
 const SHAFTS = [
@@ -82,8 +82,7 @@ export function makePark(wrap: HTMLElement, canvas: HTMLCanvasElement, urls: Par
   const mk = (w: number, h: number) => { const c = document.createElement('canvas'); c.width = w; c.height = h; return c; };
   let dead = false, raf = 0, active = true, visible = !document.hidden, onScreen = true, ready = false;
   let sized = false;
-  // leaves are drawn bigger when the hero is small so they still read as leaves, not dust
-  let leafBoost = 1;
+  let viewScale = 0.36; // css px per art px
   let rs = 1; // render scale (canvas px per art px)
 
   // ---------- assets ----------
@@ -101,7 +100,7 @@ export function makePark(wrap: HTMLElement, canvas: HTMLCanvasElement, urls: Par
     const r = wrap.getBoundingClientRect();
     const dpr = Math.min(window.devicePixelRatio || 1, 2);
     const next = clamp((r.width * dpr) / W, 0.3, 1);
-    if (r.width > 0) leafBoost = clamp(0.62 / (r.width / W), 1, 2.6);
+    if (r.width > 0) { viewScale = r.width / W; cell = clamp(Math.sqrt(r.width / 632), 0.75, 1.4); }
     if (sized && Math.abs(next - rs) < 0.02) return;
     sized = true;
     rs = next;
@@ -112,20 +111,23 @@ export function makePark(wrap: HTMLElement, canvas: HTMLCanvasElement, urls: Par
   ro?.observe(wrap);
 
   // ---------- leaf sprites ----------
-  const sprites: HTMLCanvasElement[] = [];
+  // each leaf has a sunlit face and a darker underside; as it turns, the two alternate like a real leaf
+  const sprites: HTMLCanvasElement[] = [], backs: HTMLCanvasElement[] = [];
   const SPR_PER_SHAPE = PALETTE.length;
   function buildSprites() {
-    SHAPES.forEach((rows) => {
-      PALETTE.forEach((c) => {
+    for (const side of [1, 0]) SHAPES.forEach((rows) => {
+      PALETTE.forEach((c0) => {
+        // underside: a little darker and redder, never muddy
+        const c = side ? c0 : [c0[0] * 0.84, c0[1] * 0.66, c0[2] * 0.7];
         const h = rows.length, w = rows[0].length, cv = mk(w, h), x = cv.getContext('2d') as CanvasRenderingContext2D;
         const id = x.createImageData(w, h);
         for (let yy = 0; yy < h; yy++) for (let xx = 0; xx < w; xx++) {
           const ch = rows[yy][xx]; if (ch === '.') continue;
-          const k = ch === '+' ? 1.22 : ch === '-' ? 0.68 : 1, o = (yy * w + xx) * 4;
+          const k = ch === '-' ? 0.82 : 1, o = (yy * w + xx) * 4;
           id.data[o] = Math.min(255, c[0] * k); id.data[o + 1] = Math.min(255, c[1] * k); id.data[o + 2] = Math.min(255, c[2] * k); id.data[o + 3] = 255;
         }
         x.putImageData(id, 0, 0);
-        sprites.push(cv);
+        (side === 1 ? sprites : backs).push(cv);
       });
     });
   }
@@ -182,108 +184,130 @@ export function makePark(wrap: HTMLElement, canvas: HTMLCanvasElement, urls: Par
   }
 
   // ---------- leaves ----------
+  // A quiet fall: a handful of leaves at most, sometimes none. Each one lets go of the canopy, eases into
+  // its fall, rocks like a real leaf (slowing at the top of each swing), drifts with the breeze and its own
+  // little eddies, sometimes spirals, lands, rests a while and fades back into the painted leaves.
   const air: Leaf[] = [], rest: Leaf[] = [];
-  let perf = window.innerWidth < 640 ? 0.65 : 1;
-  const airTarget = () => Math.round(42 * S.density * perf);
-  function depthFor(d: number) { return d < 0.32 ? R(1.5, 2.2) : d < 0.62 ? R(2.4, 3.4) : R(3.6, 5); }
-  function groundFor(P: number) {
-    // nearer leaves land nearer the bottom of the frame
-    const k = clamp((P - 1.5) / 3.5, 0, 1);
-    return 612 + k * k * 250 + R(-10, 14);
+  let perf = 1;
+  let lastSpawn = -99, moodSeed = R(0, 100);
+  const smooth = (a: number) => a * a * (3 - 2 * a);
+  // how many leaves the moment wants: drifts slowly between a lull (0) and a few (about 6)
+  function fallMood() {
+    const m = noise(t * 0.03 + moodSeed, 3.7) * 0.75 + noise(t * 0.11 + moodSeed, 9.1) * 0.25;
+    return smooth(clamp((m - 0.2) / 0.55, 0, 1));
   }
-  function newLeaf(fg: boolean): Leaf | null {
-    let x: number, y: number, P: number;
-    if (fg) {
-      // big leaves crossing close to the viewer, carried in on the wind from the top or a side
-      P = R(5.5, 7.5);
-      const fromSide = rnd() < 0.5;
-      x = fromSide ? (windAt(0) >= 0 ? -20 : W + 20) : R(0, W); y = fromSide ? R(40, 380) : -20;
-    } else {
-      if (!sources.length) return null;
-      const s = sources[(rnd() * sources.length) | 0];
-      x = s.x + R(-6, 6); y = s.y + R(0, 8); P = depthFor(s.d);
-    }
-    const shape = P > 4.5 ? 3 + ((rnd() * 2) | 0) : P > 2.6 ? 1 + ((rnd() * 3) | 0) : (rnd() * 2) | 0;
+  const airTarget = () => {
+    const g = clamp(gustEnv(t), 0, 1);
+    return Math.round((fallMood() * 5.6 + g * 1.4) * S.density);
+  };
+  // deeper reds and burnt oranges more often: they read against the gold canopy without any outline
+  function pickColour() { return rnd() < 0.6 ? 2 + ((rnd() * 4) | 0) : (rnd() * 2) | 0; }
+  function groundFor(k: number) { return 616 + Math.pow(k, 1.6) * 236 + R(-8, 10); }
+  function newLeaf(): Leaf | null {
+    if (!sources.length) return null;
+    // the upper canopy only, and never from the trees right at the vanishing point
+    let s = sources[(rnd() * sources.length) | 0];
+    // the breeze mostly blows left to right, so give leaves room to travel before they leave the frame
+    for (let i = 0; i < 10 && (s.y > 470 || s.d < 0.16 || s.x > W - 220); i++) s = sources[(rnd() * sources.length) | 0];
+    if (s.y > 470 || s.d < 0.16) return null;
+    // depth: mostly far and middle distance; a near leaf is rare and still small
+    let k = clamp((s.d - 0.16) / 0.84, 0, 1) * 0.8 + R(-0.12, 0.12);
+    if (rnd() < 0.12 && s.d > 0.6) k = R(0.85, 1);
+    k = clamp(k, 0, 1);
+    const shape = k < 0.35 ? (rnd() * 2) | 0 : k < 0.75 ? 1 + ((rnd() * 3) | 0) : 2 + ((rnd() * 3) | 0);
+    const sp = 0.75 + k * 0.7; // nearer leaves cross the frame faster
     return {
-      x, y, vx: 0, vy: R(2, 8), P, spr: shape * SPR_PER_SHAPE + ((rnd() * SPR_PER_SHAPE) | 0), ang: R(0, 6.28), spin: R(-1.6, 1.6),
-      tum: R(0, 6.28), tumS: R(2, 4.5), ph: R(0, 6.28), fw: R(1.4, 2.6), amp: R(10, 24), groundY: fg ? H + 40 : groundFor(P),
-      state: 0, life: 0, restFor: R(22, 48), fg, alpha: 1,
+      x: s.x + R(-5, 5), y: s.y + R(0, 6), vx: 0, vy: 0, k, spr: shape * SPR_PER_SHAPE + pickColour(),
+      ang: R(-0.6, 0.6), spinBase: R(-0.5, 0.5), tum: R(0, 6.28), tumS: R(1.2, 2.6),
+      swing: R(0, 6.28), swingW: R(1.1, 1.9), swingA: R(14, 30) * sp, fall: R(30, 48) * sp, sp,
+      drift: R(-6, 6), seed: R(0, 100), spiral: 0, spiralR: 0, nextTwist: R(2.5, 7),
+      groundY: groundFor(k), state: 0, life: 0, restFor: R(5, 12), alpha: 0, fade: 0,
     };
   }
-  function seedGround() {
-    for (let i = 0; i < Math.round(16 * S.density); i++) {
-      const P = R(2.6, 5), y = groundFor(P) + R(-6, 10);
-      const spread = (y - VP.y) * 3.4;
-      const l = newLeaf(false); if (!l) return;
-      l.P = P; l.x = VP.x + R(-spread, spread); l.y = y; l.groundY = y; l.state = 1; l.life = R(0, 20); l.ang = R(0, 6.28);
-      rest.push(l);
-    }
-  }
   function seedAir() {
-    // start mid-fall, so the first frame already feels like autumn
-    for (let i = 0; i < Math.round(airTarget() * 0.8); i++) {
-      const l = newLeaf(rnd() < 0.06); if (!l) return;
-      const k = rnd();
-      l.y = l.y + (Math.min(l.groundY, H) - l.y) * k * 0.9; l.x += R(-40, 40); l.life = R(0, 8); l.vy = 14 * l.P / 3;
+    // begin mid-scene with one or two already falling, not a burst
+    const n = Math.min(2, airTarget());
+    for (let i = 0; i < n; i++) {
+      const l = newLeaf(); if (!l) return;
+      l.life = 2 + R(0, 3); l.alpha = 1; l.vy = l.fall;
+      l.y += (l.groundY - l.y) * R(0.15, 0.6);
       air.push(l);
     }
   }
   function updateLeaves(dt: number) {
-    // keep a steady fall going, with extra leaves torn loose while a gust passes
-    const g = gustEnv(t);
-    const want = airTarget() * (1 + 0.5 * clamp(g, 0, 1));
-    if (air.length < want && rnd() < dt * (2.2 + 6 * g) * S.density * Math.max(0.3, S.wind)) {
-      const l = newLeaf(rnd() < 0.09); if (l) air.push(l);
+    // trickle, never stream: at most one new leaf every 1.4 to 3.5 seconds, and only while the mood wants more
+    if (air.length < airTarget() && t - lastSpawn > R(1.4, 3.5) && rnd() < dt * 0.8) {
+      const l = newLeaf(); if (l) { air.push(l); lastSpawn = t; }
     }
     for (let i = air.length - 1; i >= 0; i--) {
-      const l = air[i], kd = l.P / 3;
+      const l = air[i];
       l.life += dt;
-      const w = windAt(l.x);
-      const term = (16 + 10 * (l.fg ? 1.6 : 1)) * kd;
-      l.vy += (term - l.vy) * Math.min(1, dt * 1.4);
-      const flutter = Math.sin(l.life * l.fw + l.ph) * l.amp * kd;
-      l.vx += (w * 46 * kd + flutter - l.vx) * Math.min(1, dt * 2.2);
-      l.x += l.vx * dt;
-      l.y += (l.vy + Math.cos(l.life * l.fw * 2 + l.ph) * 6 * kd) * dt;
-      l.ang += (l.spin + w * 0.6) * dt;
-      l.tum += l.tumS * dt;
-      if (l.x < -60 || l.x > W + 60 || l.y > H + 40) { air.splice(i, 1); continue; }
-      if (!l.fg && l.y >= l.groundY) {
+      // letting go: a moment of hesitation, then the fall eases in
+      const detach = smooth(clamp(l.life / 1.6, 0, 1));
+      l.alpha = Math.min(1, l.life / 0.9);
+      if (l.fade) { l.alpha = Math.max(0, 1 - (l.life - l.fade) / 1.2); if (l.alpha <= 0) { air.splice(i, 1); continue; } }
+      // the breeze, plus a slow personal eddy that now and then turns a leaf back on itself
+      const eddy = (noise(l.life * 0.35 + l.seed, l.seed) - 0.5) * 2;
+      const wantVx = (windAt(l.x) * 17 + l.drift + eddy * 12) * l.sp * detach;
+      l.vx += (wantVx - l.vx) * Math.min(1, dt * 0.9);
+      // the falling-leaf rock: side to side, slowing and lifting slightly at the top of each swing
+      l.swing += l.swingW * dt;
+      const sw = Math.sin(l.swing), cw = Math.cos(l.swing);
+      const wantVy = l.fall * (0.55 + 0.6 * cw * cw) * detach;
+      l.vy += (wantVy - l.vy) * Math.min(1, dt * 1.6);
+      let sx = cw * l.swingA * l.swingW * detach;
+      // now and then a leaf catches the air and spirals for a couple of turns
+      if (!l.spiral && l.life > l.nextTwist) {
+        if (rnd() < 0.45) { l.spiral = l.life; l.spiralR = R(8, 16) * l.sp; }
+        l.nextTwist = l.life + R(4, 9);
+      }
+      let tumS = l.tumS, slow = 1;
+      if (l.spiral) {
+        const a = l.life - l.spiral, dur = 2.6;
+        if (a > dur) l.spiral = 0;
+        else {
+          const env = Math.sin((a / dur) * Math.PI);
+          sx += -Math.sin(a * 4.2) * l.spiralR * 4.2 * env;
+          slow = 1 - 0.35 * env;
+          tumS = l.tumS + 4 * env;
+        }
+      }
+      l.x += (l.vx + sx) * dt;
+      l.y += l.vy * slow * dt;
+      // tilt follows the swing, with a slow drift of its own; the edge-on turn is continuous, not stepped
+      l.ang = sw * 0.55 + l.spinBase * l.life;
+      l.tum += tumS * dt;
+      if (l.x < -30 || l.x > W + 30) { if (!l.fade) l.fade = l.life; continue; }
+      if (l.y >= l.groundY) {
         air.splice(i, 1);
-        if (rest.length < 46 * S.density && rnd() < 0.6) { l.state = 1; l.y = l.groundY; l.life = 0; l.restFor = R(22, 48); rest.push(l); }
+        l.state = 1; l.y = l.groundY; l.life = 0; l.vx *= 0.3; l.alpha = 1;
+        rest.push(l);
       }
     }
-    // leaves on the path: a passing gust lifts a few and tumbles them along before they settle again
-    const lift = clamp(g, 0, 1.4);
+    // landed: a short slide to a stop, a rest, then a slow fade back into the painted leaves
     for (let i = rest.length - 1; i >= 0; i--) {
-      const l = rest[i], kd = l.P / 3;
+      const l = rest[i];
       l.life += dt;
-      if (l.state === 1) {
-        if ((lift > 0.35 && rnd() < dt * 0.9 * lift) || rnd() < dt * 0.012) {
-          const w = windAt(l.x);
-          l.state = 2; l.vx = (w >= 0 ? 1 : -1) * R(22, 48) * kd * Math.max(0.4, Math.abs(w)); l.vy = -R(10, 28) * kd; l.spin = R(4, 9) * Math.sign(l.vx || 1);
-        }
-        if (l.life > l.restFor) { l.alpha -= dt * 0.25; if (l.alpha <= 0) rest.splice(i, 1); }
-      } else {
-        l.vy += 70 * kd * dt; l.x += l.vx * dt; l.y += l.vy * dt; l.vx *= Math.pow(0.55, dt); l.ang += l.spin * dt; l.tum += 6 * dt;
-        if (l.y >= l.groundY) { l.y = l.groundY; if (Math.abs(l.vx) < 8 * kd) { l.state = 1; l.vy = 0; } else { l.vy = -Math.abs(l.vy) * 0.25; } }
-        if (l.x < -40 || l.x > W + 40) rest.splice(i, 1);
-      }
+      l.x += l.vx * dt; l.vx *= Math.pow(0.08, dt);
+      l.tum += (Math.round(l.tum / Math.PI) * Math.PI - l.tum) * Math.min(1, dt * 4);
+      if (l.life > l.restFor) { l.alpha -= dt / 4; if (l.alpha <= 0) rest.splice(i, 1); }
     }
   }
-  function drawLeaf(l: Leaf, flatten: number) {
-    const spr = sprites[l.spr];
-    // a turning leaf shows its edge: quantise the tumble so it reads as frames, not a smooth squash
-    const tq = Math.round(Math.cos(l.tum) * 3) / 3;
-    const P = l.P * leafBoost;
-    const sx = (Math.abs(tq) < 0.2 ? 0.34 : tq) * P, sy = P * flatten;
-    ctx.save();
-    ctx.globalAlpha = l.alpha;
-    ctx.translate(Math.round(l.x), Math.round(l.y));
-    ctx.rotate(Math.round(l.ang / 0.2618) * 0.2618);
-    ctx.scale(sx, sy);
+  // css pixels per sprite pixel, by depth; leaves stay small at any hero size
+  let cell = 1;
+  function drawLeaf(l: Leaf) {
+    const turn = Math.cos(l.tum);
+    const spr = (turn < 0 ? backs : sprites)[l.spr];
+    const size = (1.0 + l.k * 0.9) * cell / viewScale; // art px per sprite pixel
+    const sxk = Math.sign(turn || 1) * Math.max(0.3, Math.abs(turn));
+    const flat = l.state === 1 ? 0.6 : 1;
+    // distance softens a leaf into the haze a little
+    ctx.globalAlpha = l.alpha * (0.72 + 0.28 * l.k);
+    ctx.setTransform(rs, 0, 0, rs, 0, 0);
+    ctx.translate(l.x, l.y);
+    ctx.rotate(l.ang);
+    ctx.scale(sxk * size, size * flat);
     ctx.drawImage(spr, -spr.width / 2, -spr.height / 2);
-    ctx.restore();
   }
 
   // ---------- light ----------
@@ -474,14 +498,17 @@ export function makePark(wrap: HTMLElement, canvas: HTMLCanvasElement, urls: Par
       ctx.fillRect(Math.round(gl.x / 3) * 3, Math.round(gl.y / 3) * 3, 3, 3);
     }
     ctx.globalCompositeOperation = 'source-over';
-    // far leaves and settled leaves, then walkers, then nearer leaves
-    for (const l of rest) drawLeaf(l, l.state === 1 ? 0.55 : 1);
-    for (const l of air) if (l.P < 2.3) drawLeaf(l, 1);
+    // leaves are filtered like the painting itself is when it's scaled down, so they sit in it, not on it
+    ctx.imageSmoothingEnabled = true;
+    for (const l of rest) drawLeaf(l);
+    for (const l of air) if (l.k < 0.45) drawLeaf(l);
+    ctx.setTransform(rs, 0, 0, rs, 0, 0); ctx.globalAlpha = 1;
     for (const w of walkers) drawWalker(w, !S.walkers);
     ctx.imageSmoothingEnabled = false;
     drawBird();
-    for (const l of air) if (l.P >= 2.3) drawLeaf(l, 1);
     ctx.imageSmoothingEnabled = true;
+    for (const l of air) if (l.k >= 0.45) drawLeaf(l);
+    ctx.setTransform(rs, 0, 0, rs, 0, 0); ctx.globalAlpha = 1;
   }
   function renderStill() { if (ready) render(0, true); }
 
@@ -522,7 +549,6 @@ export function makePark(wrap: HTMLElement, canvas: HTMLCanvasElement, urls: Par
     if (dead) return;
     buildSprites();
     scanCanopy();
-    seedGround();
     seedAir();
     ready = true;
     resize();
@@ -543,7 +569,7 @@ export function makePark(wrap: HTMLElement, canvas: HTMLCanvasElement, urls: Par
       const prevDensity = S.density;
       Object.assign(S, next);
       if (next.density !== undefined && next.density < prevDensity) {
-        while (air.length > airTarget()) air.pop();
+        for (let i = air.length - 1; i >= airTarget(); i--) if (!air[i].fade) air[i].fade = air[i].life;
       }
       sync();
     },
