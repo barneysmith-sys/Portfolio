@@ -3,14 +3,14 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Barney J. Smith — Founder, Product &amp; Design</title>
+<title>barney j. smith — 20-year-old building tech</title>
 <link rel="canonical" href="https://barneyjsmith.com/">
 <meta name="description" content="Barney J. Smith is an entrepreneur and incoming Founder in Residence at Entrepreneurs First. Previously at L'Oréal, Figma and HumanX. Studying at George Washington University.">
 <meta name="robots" content="index, follow">
 <meta name="theme-color" content="#fdfdfc">
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="Barney J. Smith">
-<meta property="og:title" content="Barney J. Smith — Founder, Product &amp; Design">
+<meta property="og:title" content="barney j. smith — 20-year-old building tech">
 <meta property="og:description" content="Barney J. Smith is an entrepreneur and incoming Founder in Residence at Entrepreneurs First. Previously at L'Oréal, Figma and HumanX. Studying at George Washington University.">
 <meta property="og:url" content="https://barneyjsmith.com/">
 <meta property="og:image" content="https://barneyjsmith.com/og.png">
@@ -19,7 +19,7 @@
 <meta property="og:image:height" content="909">
 <meta property="og:image:alt" content="Barney J. Smith beside the W 64 St street sign">
 <meta name="twitter:card" content="summary_large_image">
-<meta name="twitter:title" content="Barney J. Smith — Founder, Product &amp; Design">
+<meta name="twitter:title" content="barney j. smith — 20-year-old building tech">
 <meta name="twitter:description" content="Barney J. Smith is an entrepreneur and incoming Founder in Residence at Entrepreneurs First. Previously at L'Oréal, Figma and HumanX. Studying at George Washington University.">
 <meta name="twitter:image" content="https://barneyjsmith.com/og.png">
 <meta name="twitter:image:alt" content="Barney J. Smith beside the W 64 St street sign">
@@ -152,12 +152,30 @@
     grid-area: 1 / 1;
     transition: opacity 600ms ease;
   }
-  .scene-day {
-    position: relative;
+  .mark-sizer {
+    grid-area: 1 / 1;
     width: min(13.5rem, 62%);
     aspect-ratio: 442 / 444;
+    visibility: hidden;
+    pointer-events: none;
+  }
+  .scene-day {
+    position: absolute;
+    left: 50%;
+    top: 0;
+    bottom: 0;
+    width: auto;
+    height: auto;
+    aspect-ratio: 1774 / 887;
     opacity: 1;
-    pointer-events: auto;
+    pointer-events: none;
+    transform: translateX(-50%);
+    -webkit-mask-image: url("living-sign/assets/park_mask.png");
+    -webkit-mask-size: 100% 100%;
+    -webkit-mask-repeat: no-repeat;
+    mask-image: url("living-sign/assets/park_mask.png");
+    mask-size: 100% 100%;
+    mask-repeat: no-repeat;
   }
   .scene-night {
     position: absolute;
@@ -203,10 +221,9 @@
     pointer-events: none;
   }
   .day-canvas {
-    left: -9.05%;
-    top: -33.784%;
-    width: 147.511%;
-    height: 138.288%;
+    inset: 0;
+    width: 100%;
+    height: 100%;
   }
   .scene-night video {
     position: absolute;
@@ -256,10 +273,9 @@
     </button>
   </header>
 
-  <div class="mark" id="living-sign" role="img" aria-label="Illustration of a W 64 St street sign on a black lamppost under autumn leaves, with a small sparrow perched on the sign">
+  <div class="mark" id="living-sign" role="img" aria-label="Pixel-art painting of The Mall in Central Park in autumn: an avenue of orange and gold trees, lamps and benches, leaves drifting down and two people walking into the distance">
+    <div class="mark-sizer" aria-hidden="true"></div>
     <div class="scene scene-day" id="day-wrap" aria-hidden="true">
-      <img class="layer" src="living-sign/assets/foliage.png" alt="">
-      <img class="layer" src="living-sign/assets/static.png" alt="">
       <canvas id="day-canvas" class="day-canvas"></canvas>
     </div>
     <div class="scene scene-night" id="night-wrap" aria-hidden="true">
@@ -302,18 +318,18 @@
 })();
 </script>
 <script type="module">
-import { makeScene } from "./livingScene.js";
+import { makePark } from "./parkScene.js";
 
 var wrap = document.getElementById("living-sign");
 var dayWrap = document.getElementById("day-wrap");
 var nightWrap = document.getElementById("night-wrap");
 var video = document.getElementById("night-video");
-var day = makeScene(dayWrap, document.getElementById("day-canvas"), {
-  foliage: "living-sign/assets/foliage.png",
-  stat: "living-sign/assets/static.png",
-  atlas: "living-sign/assets/bird_atlas.png"
+var day = makePark(dayWrap, document.getElementById("day-canvas"), {
+  base: "living-sign/assets/park_base.webp",
+  canopy: "living-sign/assets/park_canopy.webp",
+  walkers: "living-sign/assets/park_walkers.png"
 });
-var DAY_LABEL = "Illustration of a W 64 St street sign on a black lamppost under autumn leaves, with a small sparrow perched on the sign";
+var DAY_LABEL = "Pixel-art painting of The Mall in Central Park in autumn: an avenue of orange and gold trees, lamps and benches, leaves drifting down and two people walking into the distance";
 var NIGHT_LABEL = "View of the Manhattan skyline at night from a rainy fire escape, apartment lights turning on and off across the city";
 var dayTimer = 0;
 var nightTimer = 0;
