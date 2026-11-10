@@ -1,7 +1,13 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"
+        xmlns:image="http://www.google.com/schemas/sitemap-image/1.1">
   <url>
     <loc>https://barneyjsmith.com/</loc>
-    <lastmod>2026-10-09</lastmod>
+    <lastmod>2026-11-10</lastmod>
+    <image:image>
+      <image:loc>https://barneyjsmith.com/og-image.jpg</image:loc>
+      <image:title>Barney J. Smith: 20 yr old building in tech</image:title>
+      <image:caption>Autumn in Central Park, with the name Barney J. Smith and the line 20 yr old building in tech.</image:caption>
+    </image:image>
   </url>
 </urlset>
