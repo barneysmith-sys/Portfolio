@@ -71,10 +71,13 @@
 (function () {
   var stored = null;
   try { stored = localStorage.getItem("theme"); } catch (e) {}
-  var theme = stored === "light" || stored === "dark"
-    ? stored
-    : (window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+  var now = new Date();
+  var minutes = now.getHours() * 60 + now.getMinutes();
+  var byTime = minutes >= 7 * 60 && minutes < 19 * 60 ? "light" : "dark";
+  var theme = stored === "light" || stored === "dark" ? stored : byTime;
   document.documentElement.setAttribute("data-theme", theme);
+  var earlyMeta = document.querySelector('meta[name="theme-color"]');
+  if (earlyMeta) earlyMeta.setAttribute("content", theme === "dark" ? "#0a1019" : "#fdfdfc");
 })();
 </script>
 <style>
